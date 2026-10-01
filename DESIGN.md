@@ -289,3 +289,4 @@ The first memories the user wants pinned once memorytree runs:
 
 1. **Simple first, depth on demand** (2026-09-30). Any doc, README or answer opens with the shortest form that says what it is and why, in a few direct lines, and links to the deeper material (e.g. `DESIGN.md`) instead of inlining it. The reference example is this repository's README.
 
+2. **Break the stone** (2026-10-01). Every project is built by breaking it into smaller pieces: milestones (outcomes) → sprints (batches) → issues (pieces), each with a clear "done when", worked in order. Tracking lives in memorytree, not in a hosted tracker.
