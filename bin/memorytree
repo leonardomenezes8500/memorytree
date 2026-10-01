@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.15"
+VERSION = "0.1.16"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -37,6 +37,7 @@ DEFAULT_CONFIG = """\
     enabled = true
     maxPromptChars = 6000
     maxAnswerChars = 12000
+    skipShortAnswer = 300    # skip turns whose prompt has no searchable word ("oi", "ok") and whose answer is shorter
 [sync]
     pull = session-start     # session-start | never
     push = after-capture     # after-capture | manual
@@ -244,7 +245,7 @@ what when where which who how why its into about then than them they there their
 also some more most very too only been being does did doing done let get got make made use using want
 need like here now yes okay que para com não nao uma uns umas dos das por pra pro mas como mais isso
 esse essa este esta aqui ele ela eles elas voce você meu minha seu sua tem ter foi ser são sao está
-estou tipo assim então entao porque quando também tmb
+estou tipo assim então entao porque quando também tmb sim blz beleza valeu obrigado obrigada thanks thank pode
 """.split())
 
 
@@ -595,7 +596,8 @@ def on_stop(event, agent):
         return "{}"
     state = load_session(event.get("session_id"))
     answer = event.get("last_assistant_message") or last_assistant_text(event.get("transcript_path"))
-    if state.get("prompt") or answer:
+    trivial = not terms(state.get("prompt", "")) and len(answer) < int(config()["capture.skipshortanswer"])
+    if not trivial:  # an "oi" or "ok" with a short reply holds nothing to remember; skip the model call
         queue = session_path("x").parent.parent / "queue"
         queue.mkdir(parents=True, exist_ok=True)
         job = queue / f"{time.time_ns()}.json"

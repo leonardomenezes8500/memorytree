@@ -325,4 +325,12 @@ procs = [subprocess.Popen(["python3", str(ROOT / "bin" / "memorytree"), "sync"],
          for _ in range(4)]
 assert all(p.wait() == 0 and "multiple branches" not in p.stderr.read() for p in procs)
 
+# capture skips trivial turns: no searchable word in the prompt and a short answer
+head = vault_git("rev-parse", "HEAD")
+fake({"memories": [{"path": "topics/greeting.md", "title": "G", "body": "should never be written"}],
+      "commit": {"kind": "fact", "topics": ["x"], "summary": "x"}})
+capture_turn("s12", "oi", "Oi! Em que posso ajudar?")
+capture_turn("s12", "valeu, blz", "De nada.")
+assert vault_git("rev-parse", "HEAD") == head and not (VAULT / "topics" / "greeting.md").exists()
+
 print("ok")
