@@ -306,4 +306,9 @@ assert not plain_commit("env/h.md", "no front matter\n", FACT)  # and it still e
 mt("commit", "-k", "preference", "-t", "user", "-m", "ui checks")
 assert "user/ui-checks.md" in hook("prompt", "claude-code", {"session_id": "s9", "prompt": "viewport firefox"})["additionalContext"]
 
+# sync: concurrent session starts and captures share one lock, so pulls never race on FETCH_HEAD
+procs = [subprocess.Popen(["python3", str(ROOT / "bin" / "memorytree"), "sync"], stderr=subprocess.PIPE, text=True)
+         for _ in range(4)]
+assert all(p.wait() == 0 and "multiple branches" not in p.stderr.read() for p in procs)
+
 print("ok")
