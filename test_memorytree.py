@@ -3,6 +3,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -199,6 +200,9 @@ assert "**Hook check.**" in claude_md and "/hooks" in claude_md  # tells the use
 assert "# Pinned memories" in claude_md and "## T (pinned/style.md)" in claude_md  # subagents read this file too
 start = hook("session-start", "claude-code", {"session_id": "s10", "source": "startup"})["additionalContext"]
 assert "Dante" in start and "pinned/style.md" not in start  # not injected twice
+shown = subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "agent-hook", "session-start", "codex"],
+                       input='{"session_id": "s11"}', capture_output=True, text=True).stdout
+assert re.search(r"memorytree active: \d+ memories, 1 pinned", json.loads(shown)["systemMessage"])  # seen by the user
 assert (HOMES / "codex" / "AGENTS.md").read_text().count("<!-- memorytree -->") == 1
 assert "unchanged" in mt("install", "codex")
 mt("install", "--uninstall")

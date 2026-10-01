@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -451,8 +451,12 @@ def native_memory_on(agent):
     return None
 
 
-def context(event, text):
-    return json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
+def context(event, text, status=None):
+    """additionalContext goes to the model; systemMessage is shown to the user in both agents' UI."""
+    out = {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
+    if status:
+        out["systemMessage"] = status
+    return json.dumps(out)
 
 
 def session_path(session_id):
@@ -483,12 +487,13 @@ def detach(*command):
 def on_session_start(event, agent):
     if not (VAULT / ".git").is_dir():
         return context("SessionStart", f"memorytree is installed but has no vault at {VAULT}. "
-                       "Tell the user once and offer to run the memorytree setup.")
+                       "Tell the user once and offer to run the memorytree setup.",
+                       f"memorytree: no vault at {VAULT} - run the memorytree setup")
     reason = native_memory_on(agent)
     if reason:
         return context("SessionStart", f"memorytree is NOT active: {reason}. memorytree refuses to run alongside "
                        "built-in memory. Tell the user and offer to turn it off; nothing is recalled or captured "
-                       "until then.")
+                       "until then.", f"memorytree NOT active: {reason}")
     if event.get("source") in ("clear", "compact"):
         save_session(event.get("session_id"), {"seen": [], "prompt": ""})
     if config()["sync.pull"] == "session-start" and git("remote", check=False).stdout.strip():
@@ -505,7 +510,9 @@ def on_session_start(event, agent):
         parts.append(f"## {meta.get('title', 'User profile')} (user/profile.md)\n{body}")
     if not installed:  # otherwise the pinned memories already arrive through the global instructions
         parts += [f"## {meta.get('title', rel)} ({rel})\n{body}" for rel, meta, body in pinned_memories()]
-    return context("SessionStart", "\n\n".join(parts))
+    memories = sum(1 for p in VAULT.rglob("*.md") if is_memory(str(p.relative_to(VAULT))))
+    status = f"memorytree active: {memories} memories, {len(pinned_memories())} pinned"
+    return context("SessionStart", "\n\n".join(parts), status)
 
 
 def recall(prompt, session_id):
