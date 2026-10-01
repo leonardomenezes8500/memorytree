@@ -281,3 +281,4 @@ The first memories the user wants pinned once memorytree runs:
 1. **Simple first, depth on demand** (2026-09-30). Any doc, README or answer opens with the shortest form that says what it is and why, in a few direct lines, and links to the deeper material (e.g. `DESIGN.md`) instead of inlining it. The reference example is this repository's README.
 
 2. **Break the stone** (2026-10-01). A development standard for every project: break it down inside its own repository, in a `ROADMAP.md` with milestones (outcomes) → sprints (batches) → issues (pieces), each with a "done when", worked in order. The commit that finishes an issue checks it off. There is no hosted tracker.
+3. **Design, then README, then roadmap** (2026-10-01). Every project starts in this order: `DESIGN.md` (how it works, decided together until no open questions remain) → `README.md` (what it is and why, in a few lines, linking the design) → `ROADMAP.md` (the stone broken into pieces). Code comes after.
