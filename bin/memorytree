@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.12"
+VERSION = "0.1.13"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -94,17 +94,12 @@ def cmd_config(args):
 
 
 COMMANDMENTS = """\
-# memorytree commandments
-
-1. memorytree is your only memory. Never use a built-in memory feature, and never write memory anywhere else.
-2. Before you ask the user or explore the filesystem about a name, project, decision or preference, search memorytree: `memorytree search <english terms>`. The user may write in any language; you search and write in English.
-3. Search by depth, going deeper only when the level above doesn't answer: injected memories → current state → history → explorations → archive → hindsight notes.
-4. The current state says what; history says why. Before proposing something, check whether it was already tried and abandoned.
-5. Capture is automatic. When the user corrects you, decides something or endorses something, make sure it reaches memorytree as a commit in the memorytree format.
-6. Pinned memories change only when the user explicitly asks.
-7. One memory per subject: edit it, don't duplicate it. Never store secret values, only where they live.
-8. Before working in a project, find its plan the way that project keeps it: a ROADMAP.md or similar file, the issue tracker named in its CLAUDE.md/AGENTS.md or README. If it keeps no plan, its recent `git log` plus its memories here are the plan. Never read the whole codebase just to learn where things stand. When work finishes a planned item, mark it done the way the project tracks it.
-9. When the user asks where things stopped ("where were we?"), answer from the latest memory events injected at session start, the memories they touched, and the project's plan and recent `git log`. Don't make the user re-explain.
+# memorytree
+Your only memory is the git vault ~/.memorytree; never use or write built-in memory. Relevant memories arrive with each prompt and capture is automatic.
+- An unknown name, project, decision or preference: `memorytree search <english terms> [-d 1-5]` before asking or exploring. Always English.
+- History says why: before proposing an idea, check it wasn't already tried and dropped.
+- "Where did we stop?": `git -C ~/.memorytree log -10 --stat`, then the project's plan (its ROADMAP.md, tracker or README) and recent git log. Never read a whole codebase to find out.
+- Pinned rules change only on the user's explicit request. Never store secret values.
 """
 
 KINDS = ("fact", "decision", "preference", "correction", "idea", "abandon", "migrate", "pin", "unpin",
@@ -400,15 +395,12 @@ def commandments_block():
     text = (VAULT / "COMMANDMENTS.md").read_text() if (VAULT / "COMMANDMENTS.md").is_file() else COMMANDMENTS
     text = text.replace("`memorytree search", f"`python3 {Path(__file__).resolve()} search").strip()
     # This block loads even when the hooks don't run, so it is what can tell the user they aren't running.
-    text += ("\n\n**Hook check.** If this session's context has no \"memorytree is active\" line from the memorytree "
-             "hooks, they are not running: say so to the user in your first reply, before anything else. Codex: "
-             "open `/hooks` and trust the three memorytree hooks (SessionStart, UserPromptSubmit, Stop), then start "
-             "a new session. Claude Code: enable the memorytree plugin (`/plugin`), then start a new session. "
-             "If the context says memorytree is NOT active, relay the reason it gives.")
-    pins = [f"## {meta.get('title', rel)} ({rel})\n\n{body}" for rel, meta, body in pinned_memories()]
+    text += ("\nHook check: if your context lacks \"memorytree is active\", tell the user first that its hooks aren't "
+             "running (Codex: trust them in /hooks; Claude Code: enable the plugin), then to start a new session.")
+    # Each pin's one-line `rule` is what loads every session; its full text stays in the vault, a search away.
+    pins = [f"- {meta.get('rule') or ' '.join(body.split())}" for rel, meta, body in pinned_memories()]
     if pins:
-        text += "\n\n# Pinned memories\n\nEndorsed by the user; they change only on the user's explicit request.\n\n"
-        text += "\n\n".join(pins)
+        text += "\n\n# Pinned rules\n" + "\n".join(pins)
     return f"<!-- memorytree -->\n{text}\n<!-- /memorytree -->\n"
 
 
@@ -504,14 +496,10 @@ def on_session_start(event, agent):
     installed = bool(BLOCK.search(GLOBAL_INSTRUCTIONS[agent].read_text() if GLOBAL_INSTRUCTIONS[agent].is_file() else ""))
     if installed:
         install_commandments(agent)
-    parts = [f"memorytree is active (vault: {VAULT}). Memories relevant to each prompt are injected "
-             f"automatically; search deeper with `python3 {Path(__file__).resolve()} search <english terms> [-d 1-5]`."]
+    parts = [f"memorytree is active. Search: `python3 {Path(__file__).resolve()} search <english terms>`."]
     if (VAULT / "user/profile.md").is_file():
         meta, body = front_matter((VAULT / "user/profile.md").read_text())
         parts.append(f"## {meta.get('title', 'User profile')} (user/profile.md)\n{body}")
-    recent = git("log", "-10", "--format=%cs %s", check=False).stdout.strip()
-    if recent:  # answers "where did we stop?" with no tool call; that question has no searchable terms
-        parts.append(f"## Latest memory events (newest first)\n{recent}")
     if not installed:  # otherwise the pinned memories already arrive through the global instructions
         parts += [f"## {meta.get('title', rel)} ({rel})\n{body}" for rel, meta, body in pinned_memories()]
     memories = sum(1 for p in VAULT.rglob("*.md") if is_memory(str(p.relative_to(VAULT))))

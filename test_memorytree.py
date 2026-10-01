@@ -196,11 +196,12 @@ assert hook("prompt", "claude-code", {"session_id": "s2", "prompt": "radar"}) is
 mt("install")
 claude_md = (HOMES / "claude" / "CLAUDE.md").read_text()
 assert claude_md.startswith("# my rules") and "<!-- memorytree -->" in claude_md and "search <english" in claude_md
-assert "**Hook check.**" in claude_md and "/hooks" in claude_md  # tells the user when hooks are not running
-assert "# Pinned memories" in claude_md and "## T (pinned/style.md)" in claude_md  # subagents read this file too
+assert len(claude_md) < 1600  # the block loads every session: keep it small
+assert "Hook check" in claude_md and "/hooks" in claude_md  # tells the user when hooks are not running
+assert "# Pinned rules\n- Body." in claude_md  # subagents read this file too; a pin without `rule` loads its body
 start = hook("session-start", "claude-code", {"session_id": "s10", "source": "startup"})["additionalContext"]
 assert "Dante" in start and "pinned/style.md" not in start  # not injected twice
-assert "## Latest memory events" in start and "preference(user): assistant name" in start
+assert "memory events" not in start  # history loads only on request
 shown = subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "agent-hook", "session-start", "codex"],
                        input='{"session_id": "s11"}', capture_output=True, text=True).stdout
 assert re.search(r"memorytree active: \d+ memories, 1 pinned", json.loads(shown)["systemMessage"])  # seen by the user

@@ -150,7 +150,7 @@ Lifecycle of an idea: it starts on `explore/<idea>`. If accepted, it is merged i
 
 Most memories are inferred: the capture model decides what was worth keeping. A **pinned** memory is different, because the user endorsed it explicitly ("I want this as a standard", "pin this"). It is the strongest signal there is.
 
-- Lives in `pinned/<slug>.md` and is loaded in every session (level 0). There are few of them and they are short. Pinned memories travel inside the commandments block in each agent's global instructions, because subagents read those files but never see hook injections.
+- Lives in `pinned/<slug>.md` and is loaded in every session (level 0). There are few of them and they are short. Each pinned memory carries a one-line `rule:` in its front matter: that line travels inside the commandments block in each agent's global instructions (subagents read those files but never see hook injections), while the full text stays in the vault for search. Everything loaded every session is kept to a few hundred tokens.
 - Protected: the capture model may never edit or delete one. Only an explicit user request changes it, through a `pin` or `unpin` commit. The pre-commit hook rejects any other commit that touches `pinned/`.
 - When the user praises something without asking to pin it, the capture model records it as a `preference` and suggests pinning it. It never pins on its own.
 - `git log --grep "Kind: pin"` is the history of everything the user has endorsed.
