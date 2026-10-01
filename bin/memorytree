@@ -2,6 +2,8 @@
 """memorytree: git for AI memory. See DESIGN.md."""
 import argparse
 import os
+import re
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -83,6 +85,102 @@ def cmd_config(args):
     return 0
 
 
+COMMANDMENTS = """\
+# memorytree commandments
+
+1. memorytree is your only memory. Never use a built-in memory feature, and never write memory anywhere else.
+2. Before you ask the user or explore the filesystem about a name, project, decision or preference, search memorytree: `memorytree search <english terms>`. The user may write in any language; you search and write in English.
+3. Search by depth, going deeper only when the level above doesn't answer: injected memories → current state → history → explorations → archive → hindsight notes.
+4. The current state says what; history says why. Before proposing something, check whether it was already tried and abandoned.
+5. Capture is automatic. When the user corrects you, decides something or endorses something, make sure it reaches memorytree as a commit in the memorytree format.
+6. Pinned memories change only when the user explicitly asks.
+7. One memory per subject: edit it, don't duplicate it. Never store secret values, only where they live.
+8. Before working in a project repository, read its ROADMAP.md. Take the next unchecked issue unless told otherwise, and check it off in the commit that finishes it.
+"""
+
+KINDS = ("fact", "decision", "preference", "correction", "idea", "abandon", "migrate", "pin", "unpin",
+         "issue", "progress", "close", "milestone", "sprint", "release", "init")
+TRAILERS = ("Kind", "Topic", "Supersedes", "Relates", "Issue", "Agent", "Machine", "Session")
+SUBJECT = re.compile(r"([a-z]+)\(([a-z0-9][a-z0-9./-]*)\): \S.*")
+GIT_GENERATED = ("Merge ", "Revert ", "fixup! ", "squash! ")
+
+
+def build_message(kind, topics, summary, body="", **trailers):
+    lines = [f"{kind}({topics[0]}): {summary}", ""]
+    if body:
+        lines += [body.strip(), ""]
+    values = {"Kind": kind, "Topic": ", ".join(topics), "Machine": socket.gethostname(), **trailers}
+    lines += [f"{k}: {values[k]}" for k in TRAILERS if values.get(k)]
+    return "\n".join(lines) + "\n"
+
+
+def validate_message(message):
+    """Errors for a memorytree commit message; empty when it is valid."""
+    message = "\n".join(l for l in message.splitlines() if not l.startswith("#")).strip()
+    subject = message.split("\n", 1)[0]
+    if subject.startswith(GIT_GENERATED):
+        return []
+    m = SUBJECT.fullmatch(subject)
+    if not m:
+        return [f"subject must be 'kind(topic): summary', got: {subject!r}"]
+    errors = []
+    kind, topic = m.groups()
+    if kind not in KINDS:
+        errors.append(f"unknown kind {kind!r}; expected one of: {', '.join(KINDS)}")
+    if len(subject) > 72:
+        errors.append(f"subject is {len(subject)} characters; keep it under 73")
+    if "\n" in message and message.split("\n")[1].strip():
+        errors.append("the subject must be followed by a blank line")
+    parsed = git("interpret-trailers", "--parse", cwd=None, input=message + "\n").stdout
+    trailers = {}
+    for line in parsed.splitlines():
+        k, _, v = line.partition(":")
+        trailers.setdefault(k.strip(), v.strip())
+    if trailers.get("Kind") != kind:
+        errors.append(f"trailer 'Kind: {kind}' is required and must match the subject")
+    if topic not in [t.strip() for t in trailers.get("Topic", "").split(",")]:
+        errors.append(f"trailer 'Topic:' is required and must include {topic!r}")
+    return errors
+
+
+def commit(message, paths=()):
+    errors = validate_message(message)
+    if errors:
+        raise SystemExit("memorytree: " + "\n  ".join(["invalid commit message:", *errors]))
+    git("add", "-A", "--", *(paths or ["."]))
+    if git("diff", "--cached", "--quiet", check=False).returncode == 0:
+        raise SystemExit("memorytree: nothing to commit")
+    result = git("commit", "-q", "-F", "-", input=message, check=False)
+    if result.returncode != 0:
+        raise SystemExit("memorytree: commit refused\n" + result.stderr.strip())
+    return git("rev-parse", "--short", "HEAD").stdout.strip()
+
+
+def cmd_commit(args):
+    trailers = {k.capitalize(): getattr(args, k) for k in ("supersedes", "relates", "issue", "agent", "session")}
+    print(commit(build_message(args.kind, args.topic, args.message, args.body or "", **trailers), args.paths))
+    return 0
+
+
+def cmd_init(args):
+    if args.clone and not VAULT.exists():
+        git("clone", "-q", args.clone, str(VAULT), cwd=None)
+    elif not (VAULT / ".git").is_dir():
+        VAULT.mkdir(parents=True, exist_ok=True)
+        git("init", "-q", "-b", "main")
+    created = []
+    for path, text in ((CONFIG, DEFAULT_CONFIG), (VAULT / "COMMANDMENTS.md", COMMANDMENTS)):
+        if not path.exists():
+            path.write_text(text)
+            created.append(path.name)
+    if created:
+        commit(build_message("init", ["memorytree"], "create vault",
+                             "Default config and the commandments every agent follows.",
+                             Agent=args.agent), created)
+    print(f"memorytree vault ready at {VAULT}" + (f" (created {', '.join(created)})" if created else ""))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="memorytree", description="Git for AI memory.")
     parser.add_argument("--version", action="version", version=f"memorytree {VERSION}")
@@ -91,6 +189,21 @@ def main(argv=None):
     p = sub.add_parser("config", help="print settings (all, or one key)")
     p.add_argument("key", nargs="?")
     p.set_defaults(func=cmd_config)
+
+    p = sub.add_parser("init", help="create the vault, or clone an existing one")
+    p.add_argument("--clone", metavar="URL", help="clone this vault repository instead of creating one")
+    p.add_argument("--agent", help="the agent running init (recorded as provenance)")
+    p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("commit", help="commit vault changes as a memory event")
+    p.add_argument("-k", "--kind", required=True, choices=KINDS)
+    p.add_argument("-t", "--topic", required=True, action="append", help="repeatable; the first goes in the subject")
+    p.add_argument("-m", "--message", required=True, help="one-line summary")
+    p.add_argument("-b", "--body", help="why it changed and what was ruled out")
+    for name in ("supersedes", "relates", "issue", "agent", "session"):
+        p.add_argument(f"--{name}")
+    p.add_argument("paths", nargs="*", help="what to commit (default: every change in the vault)")
+    p.set_defaults(func=cmd_commit)
 
     args = parser.parse_args(argv)
     return args.func(args)
