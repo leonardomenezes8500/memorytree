@@ -187,4 +187,91 @@ assert "unchanged" in mt("install", "codex")
 mt("install", "--uninstall")
 assert (HOMES / "claude" / "CLAUDE.md").read_text().strip() == "# my rules\n\nBe brief."
 
+# capture: a fake cheap model, configured like any other agent command
+import time
+
+FAKE = TMP / "fake_model.py"
+FAKE.write_text("""import json, sys
+prompt = sys.stdin.read()
+if "<version_a>" in prompt:
+    print("---\\ntitle: Merged\\n---\\n\\nmerged A and B")
+else:
+    print(open(sys.argv[1]).read())
+""")
+CANNED = TMP / "canned.json"
+
+
+def fake(output):
+    CANNED.write_text(json.dumps(output))
+    subprocess.run(["git", "-C", str(VAULT), "config", "memorytree.agent.claude-code.command",
+                    f"python3 {FAKE} {CANNED}"], check=True)
+
+
+def capture_turn(session, prompt, answer):
+    hook("prompt", "claude-code", {"session_id": session, "prompt": prompt})
+    r = subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "agent-hook", "stop", "claude-code"],
+                       input=json.dumps({"session_id": session, "last_assistant_message": answer}),
+                       capture_output=True, text=True)
+    assert r.stdout.strip() == "{}"  # Codex requires JSON from Stop hooks
+    queue = Path(vault_git("rev-parse", "--absolute-git-dir").strip()) / "memorytree" / "queue"
+    for _ in range(100):  # the capture runs detached
+        if not any(queue.glob("*.json")):
+            assert not any(queue.glob("*.failed")), (queue.parent / "capture.log").read_text()
+            return
+        time.sleep(0.1)
+    raise AssertionError("capture did not finish")
+
+
+fake({"memories": [{"path": "topics/storage.md", "title": "Storage", "keywords": "sqlite, storage",
+                    "body": "Use SQLite. Key ghp_" + "b" * 36 + " lives in pass."}],
+      "commit": {"kind": "decision", "topics": ["Storage Engine"], "summary": "use sqlite for storage" + " because" * 12,
+                 "body": "Ruled out: a server database."},
+      "next_terms": "radar weather forecast"})
+capture_turn("s5", "decidimos usar sqlite?", "Yes, SQLite.")
+log = git_log()
+assert "decision(storage-engine): use sqlite for storage because" in log and max(map(len, log.splitlines())) <= 72 and "becaus\n" not in log and "Ruled out: a server database." in log
+assert "Agent: claude-code" in log and "Session: s5" in log
+stored = (VAULT / "topics" / "storage.md").read_text()
+assert "Use SQLite." in stored and "ghp_" not in stored  # secret redacted, memory kept
+
+# prefetch: the next prompt recalls what the conversation is about, even with no matching words
+nxt = hook("prompt", "claude-code", {"session_id": "s5", "prompt": "ok, e agora?"})
+assert "projects/radar/overview.md" in nxt["additionalContext"]
+
+# capture-apply: paths outside the layout are dropped; nothing worth keeping commits nothing
+head = vault_git("rev-parse", "HEAD")
+fake({"memories": [{"path": "../escape.md", "body": "x"}, {"path": "misc/a.md", "body": "x"}],
+      "commit": {"kind": "fact", "topics": ["x"], "summary": "x"}})
+capture_turn("s6", "nada", "nada")
+fake({"memories": [], "next_terms": "nothing"})
+capture_turn("s6", "ok", "ok")
+assert vault_git("rev-parse", "HEAD") == head and not (TMP / "escape.md").exists()
+
+# a refused capture (pinned without an explicit pin) puts back exactly what it touched
+pinned_before = (VAULT / "pinned" / "style.md").read_text()
+fake({"memories": [{"path": "pinned/style.md", "title": "T", "body": "rewritten"}],
+      "commit": {"kind": "preference", "topics": ["style"], "summary": "rewrite style"}})
+capture_turn("s7", "gostei", "ok")
+assert (VAULT / "pinned" / "style.md").read_text() == pinned_before
+assert vault_git("rev-parse", "HEAD") == head and not vault_git("status", "--porcelain").strip()
+
+# conflict-resolution: two machines change one memory; the model merges it and the push goes through
+remote = TMP / "remote.git"
+subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+vault_git("remote", "add", "origin", str(remote))
+vault_git("push", "-q", "-u", "origin", "main")
+other = TMP / "other"
+subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "init", "--clone", str(remote)],
+               env={**os.environ, "MEMORYTREE_DIR": str(other)}, check=True, capture_output=True)
+(other / "topics" / "storage.md").write_text("---\ntitle: Storage\n---\n\nB says Postgres later.\n")
+subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "commit", "-k", "fact", "-t", "storage", "-m", "b"],
+               env={**os.environ, "MEMORYTREE_DIR": str(other)}, check=True, capture_output=True)
+subprocess.run(["git", "-C", str(other), "push", "-q"], check=True)
+fake({"memories": [{"path": "topics/storage.md", "title": "Storage", "body": "A says SQLite only."}],
+      "commit": {"kind": "fact", "topics": ["storage"], "summary": "a"}})
+capture_turn("s8", "sqlite", "sqlite")
+assert "merged A and B" in (VAULT / "topics" / "storage.md").read_text()
+assert vault_git("rev-parse", "HEAD") == vault_git("rev-parse", "origin/main")  # pushed
+assert not vault_git("status", "--porcelain").strip()
+
 print("ok")

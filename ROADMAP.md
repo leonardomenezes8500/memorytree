@@ -32,10 +32,10 @@ The stone, broken into pieces. Milestones are outcomes, sprints are batches of w
 
 ### M4 Capture: every turn is remembered without asking
 
-14. [ ] `capture-hook`: a detached capture after each turn, using the cheap model from config. Done when closing the session right away still captures.
-15. [ ] `capture-apply`: validate the model output, write the files, commit and push. Done when bad output is rejected and good output is committed in the right format.
-16. [ ] `prefetch`: `next_terms` from the capture call feeds the next prompt's recall. Done when a Portuguese prompt recalls an English memory on the second turn.
-17. [ ] `conflict-resolution`: two machines capture at once, and the model resolves the conflict as a `correction`. Done when a forced conflict merges cleanly.
+14. [x] `capture-hook`: a detached capture after each turn, using the cheap model from config. Done when closing the session right away still captures.
+15. [x] `capture-apply`: validate the model output, write the files, commit and push. Done when bad output is rejected and good output is committed in the right format.
+16. [x] `prefetch`: `next_terms` from the capture call feeds the next prompt's recall. Done when a Portuguese prompt recalls an English memory on the second turn.
+17. [x] `conflict-resolution`: two machines capture at once, and the model resolves the conflict as a `correction`. Done when a forced conflict merges cleanly.
 
 ### M5 Go live: memorytree replaces native memory on every machine
 

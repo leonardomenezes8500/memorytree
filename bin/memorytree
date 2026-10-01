@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """memorytree: git for AI memory. See DESIGN.md."""
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -8,6 +9,7 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -311,12 +313,16 @@ def fts_query(words):
 
 
 def search_current(words, limit=10):
+    if not words:
+        return []
     return index().execute(
         "select path, title, -bm25(files, 5.0, 10.0, 5.0, 1.0) as score from files "
         "where files match ? order by score desc limit ?", (fts_query(words), limit)).fetchall()
 
 
 def search_history(words, limit=10):
+    if not words:
+        return []
     return index().execute(
         "select sha, date, subject, -bm25(commits, 0, 0, 10.0, 5.0, 1.0) as score from commits "
         "where commits match ? order by score desc limit ?", (fts_query(words), limit)).fetchall()
@@ -444,8 +450,8 @@ def save_session(session_id, state):
 
 
 def detach(*command):
-    subprocess.Popen(command, cwd=VAULT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+    log = open(session_path("x").parent.parent / "capture.log", "a")
+    subprocess.Popen(command, cwd=VAULT, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
 
 def on_session_start(event, agent):
@@ -473,26 +479,30 @@ def on_session_start(event, agent):
 
 
 def recall(prompt, session_id):
-    """Memories for this prompt: FTS hits on main, each at most once per session."""
+    """Memories for this prompt: prefetched by the last capture, then FTS hits; each at most once per session."""
     cfg = config()
     limit, max_chars = int(cfg["recall.maxmemories"]), int(cfg["recall.maxchars"])
     state = load_session(session_id)
     state["prompt"] = prompt
+    db = index()
+    candidates = [db.execute("select path, title, body from files where path = ?", (p,)).fetchone()
+                  for p in state.pop("prefetched", [])]
     words = terms(prompt)
-    hits = []
     if words:
-        db = index()
         # BM25's IDF is ~0 in a tiny corpus, so the cutoff only means something once the vault has grown.
         min_score = float(cfg["recall.minscore"]) if db.execute("select count(*) from files").fetchone()[0] >= 30 else 0
         rows = db.execute(
             "select path, title, body, -bm25(files, 5.0, 10.0, 5.0, 1.0) as score from files "
             "where files match ? order by score desc limit ?", (fts_query(words), limit + len(state["seen"]) + 10))
-        for path, title, body, score in rows:
-            if score >= min_score and path not in state["seen"] and not path.startswith(("user/", "pinned/")):
-                hits.append((path, title, body if len(body) <= max_chars else body[:max_chars] + " [...]"))
-            if len(hits) == limit:
-                break
-    state["seen"] += [h[0] for h in hits]
+        candidates += [row[:3] for row in rows if row[3] >= min_score]
+    hits = []
+    for row in filter(None, candidates):
+        path, title, body = row
+        if path not in state["seen"] and not path.startswith(("user/", "pinned/")):
+            state["seen"].append(path)
+            hits.append((path, title, body if len(body) <= max_chars else body[:max_chars] + " [...]"))
+        if len(hits) == limit:
+            break
     save_session(session_id, state)
     return hits
 
@@ -523,10 +533,247 @@ def on_tool(event, agent):
     return ""
 
 
-AGENT_EVENTS = {"session-start": on_session_start, "prompt": on_prompt, "tool": on_tool}
+def last_assistant_text(transcript_path):
+    """Claude Code transcripts are JSONL; collect the assistant text blocks of the last turn."""
+    try:
+        lines = Path(transcript_path).read_text().splitlines()
+    except (OSError, TypeError):
+        return ""
+    texts = []
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        content = entry.get("message", {}).get("content")
+        if entry.get("type") == "user" and isinstance(content, str):
+            break  # the prompt that started this turn
+        if entry.get("type") == "assistant" and isinstance(content, list):
+            texts += [b.get("text", "") for b in reversed(content) if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n\n".join(reversed(texts)).strip()
+
+
+def on_stop(event, agent):
+    """Hand the turn to a detached capture process, so closing the session right away loses nothing."""
+    if not (VAULT / ".git").is_dir() or native_memory_on(agent) or config()["capture.enabled"] != "true":
+        return "{}"
+    state = load_session(event.get("session_id"))
+    answer = event.get("last_assistant_message") or last_assistant_text(event.get("transcript_path"))
+    if state.get("prompt") or answer:
+        queue = session_path("x").parent.parent / "queue"
+        queue.mkdir(parents=True, exist_ok=True)
+        job = queue / f"{time.time_ns()}.json"
+        job.write_text(json.dumps({"agent": agent, "session_id": event.get("session_id"), "cwd": event.get("cwd", ""),
+                                   "prompt": state.get("prompt", ""), "answer": answer}))
+        detach(sys.executable, str(Path(__file__).resolve()), "capture", str(job))
+    return "{}"  # Codex requires JSON from Stop hooks
+
+
+AGENT_EVENTS = {"session-start": on_session_start, "prompt": on_prompt, "tool": on_tool, "stop": on_stop}
+
+
+CAPTURE_PROMPT = """You maintain memorytree, a git repository of memories shared by one user's coding agents \
+(Claude Code, Codex) across machines. Below is the latest exchange between the user and an agent working in {cwd}, \
+then existing memories that may be related.
+
+Decide what from this exchange is worth remembering in future sessions:
+- the user: preferences, how they like to work, corrections and why, what they explicitly endorsed;
+- projects: purpose, status, decisions and their reasons, what was ruled out, constraints, where things live;
+- environment: machines, paths, accounts, services, external resources.
+Skip what is transient, obvious from code or git history, or already recorded. Most exchanges contain nothing new.
+
+Rules:
+- English only, concise and factual, even when the user writes in another language. Today is {today}.
+- Paths: user/profile.md (stable facts about the user, under 40 lines), projects/<name>/<file>.md, env/<file>.md, \
+topics/<file>.md. Lowercase, hyphens, .md. One memory per subject: to change one, return its full new content under \
+the same path. Link related memories with [[path-without-.md]].
+- pinned/<slug>.md only when the user explicitly asked in this exchange to pin, update or remove a pinned memory; \
+then the commit kind is pin or unpin. Praise without an explicit request is a preference, never a pin.
+- Never record secret values; record where they live.
+- The commit body says why, and what was ruled out. That is how the path from one idea to the next is remembered.
+
+Return ONLY JSON:
+{{"memories": [{{"path": "...", "title": "...", "keywords": "english search terms", "body": "markdown"}}, \
+{{"path": "...", "delete": true}}],
+ "commit": {{"kind": "one of {kinds}", "topics": ["main-topic"], "summary": "imperative, under 60 characters", \
+"body": "why"}},
+ "next_terms": "english keywords for what this conversation is about now"}}
+With nothing worth remembering, return {{"memories": [], "next_terms": "..."}}.
+
+<user_prompt>
+{prompt}
+</user_prompt>
+
+<agent_answer>
+{answer}
+</agent_answer>
+
+<existing_memories>
+{memories}
+</existing_memories>
+"""
+
+MERGE_PROMPT = """Two machines changed the same memorytree memory file at the same time. Merge them into one memory \
+that keeps every fact that is still true; where they contradict, prefer version B (the newer one). Keep the front \
+matter format. Return ONLY the merged file content.
+
+<version_a>
+{a}
+</version_a>
+
+<version_b>
+{b}
+</version_b>
+"""
+MEMORY_PATH = re.compile(r"(user|pinned|projects|env|topics)(/[a-z0-9][a-z0-9_.-]*)+\.md")
+
+
+def run_model(agent, prompt):
+    """The cheap model from config, run non-interactively with every hook off so it can't recurse."""
+    cfg = config()
+    env = {**os.environ, "MEMORYTREE_NESTED": "1"}
+    if f"agent.{agent}.command" in cfg:  # any other agent or model: a command that reads stdin, prints the answer
+        return subprocess.run(cfg[f"agent.{agent}.command"], shell=True, input=prompt, env=env,
+                              capture_output=True, text=True, timeout=300, cwd=VAULT).stdout
+    model = cfg[f"agent.{agent}.capturemodel"]
+    if agent == "codex":
+        out = session_path("x").parent.parent / f"codex-{os.getpid()}.txt"
+        subprocess.run(["codex", "exec", "--ephemeral", "--skip-git-repo-check", "-m", model, "-c",
+                        f"model_reasoning_effort={cfg.get('agent.codex.reasoningeffort', 'low')}",
+                        "--disable", "hooks", "-s", "read-only", "-o", str(out)],
+                       input=prompt, env=env, capture_output=True, text=True, timeout=300, cwd=out.parent)
+        text = out.read_text() if out.exists() else ""
+        out.unlink(missing_ok=True)
+        return text
+    return subprocess.run(["claude", "-p", "--model", model, "--no-session-persistence", "--tools", "",
+                           "--strict-mcp-config", "--settings", '{"disableAllHooks": true}'],
+                          input=prompt, env=env, capture_output=True, text=True, timeout=300,
+                          cwd=session_path("x").parent.parent).stdout
+
+
+def parse_json(text):
+    start, end = text.find("{"), text.rfind("}")
+    try:
+        return json.loads(text[start:end + 1]) if 0 <= start < end else {}
+    except ValueError:
+        return {}
+
+
+def topic_slug(text):
+    return re.sub(r"[^a-z0-9./-]+", "-", str(text).lower()).strip("-./") or "memory"
+
+
+def apply_capture(result, agent, session_id):
+    """Write the model's memories and commit them as one event. Returns the commit hash, or None."""
+    written = []
+    for item in result.get("memories") or []:
+        path = str(item.get("path", "")) if isinstance(item, dict) else ""
+        if not MEMORY_PATH.fullmatch(path):
+            continue
+        target = VAULT / path
+        if item.get("delete"):
+            if target.exists():
+                target.unlink()
+                written.append(path)
+            continue
+        body = str(item.get("body", "")).strip()
+        if not body:
+            continue
+        one_line = lambda v: " ".join(str(v).split())
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(SECRET.sub("[REDACTED]", f"---\ntitle: {one_line(item.get('title') or target.stem)}\n"
+                                                   f"keywords: {one_line(item.get('keywords', ''))}\n---\n\n{body}\n"))
+        written.append(path)
+    if not written:
+        return None
+    c = result.get("commit") or {}
+    kind = c.get("kind") if c.get("kind") in KINDS else "fact"
+    topics = [topic_slug(t)[:30] for t in (c.get("topics") or [written[0].split("/")[-1][:-3]])]
+    room = 72 - len(f"{kind}({topics[0]}): ")  # the subject must fit git's one-line view
+    summary = " ".join(str(c.get("summary") or f"update {', '.join(written)}").split())
+    if len(summary) > room:
+        summary = summary[:room + 1].rsplit(" ", 1)[0]
+    message = build_message(kind, topics, summary, SECRET.sub("[REDACTED]", str(c.get("body") or "")),
+                            Agent=agent, Session=session_id)
+    try:
+        return commit(message, written)
+    except SystemExit as refused:  # the vault's hooks said no: log it, and put back exactly what was touched
+        print(refused, file=sys.stderr)
+        for path in written:
+            if git("cat-file", "-e", f"HEAD:{path}", check=False).returncode == 0:
+                git("checkout", "-q", "HEAD", "--", path)
+            else:
+                (VAULT / path).unlink(missing_ok=True)
+        return None
+
+
+def sync(agent):
+    """Pull with rebase, resolving conflicting memories with the cheap model, then push."""
+    if not git("remote", check=False).stdout.strip():
+        return
+    git("pull", "-q", "--rebase", check=False)
+    for _ in range(20):  # one round per replayed commit; give up rather than loop forever
+        conflicted = [p for p in git("diff", "--name-only", "--diff-filter=U", check=False).stdout.splitlines() if p]
+        if not conflicted:
+            break
+        for path in conflicted:
+            a = git("show", f":2:{path}", check=False).stdout
+            b = git("show", f":3:{path}", check=False).stdout
+            merged = run_model(agent, MERGE_PROMPT.format(a=a, b=b)).strip()
+            if not merged.startswith("---\n"):
+                merged = b or a
+            (VAULT / path).write_text(SECRET.sub("[REDACTED]", merged) + "\n")
+            git("add", "--", path)
+        if git("-c", "core.editor=true", "rebase", "--continue", check=False).returncode and \
+                not git("diff", "--name-only", "--diff-filter=U", check=False).stdout.strip():
+            break
+    if (VAULT / git("rev-parse", "--git-path", "rebase-merge").stdout.strip()).exists():
+        git("rebase", "--abort", check=False)  # unresolved: keep local commits, retry on the next capture
+        return
+    git("push", "-q", check=False)
+
+
+def cmd_capture(args):
+    job = Path(args.job)
+    try:
+        capture(json.loads(job.read_text()))
+    except BaseException:
+        job.rename(job.with_suffix(".failed"))  # kept for inspection; the traceback goes to capture.log
+        raise
+    job.unlink(missing_ok=True)
+    return 0
+
+
+def capture(payload):
+    agent, session_id, cfg = payload["agent"], payload.get("session_id"), config()
+    lock_path = session_path("x").parent.parent / "capture.lock"
+    # ponytail: one lock per vault serializes captures, so two turns never rewrite the same memory blindly.
+    with open(lock_path, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        prompt = payload.get("prompt", "")[:int(cfg["capture.maxpromptchars"])]
+        answer = payload.get("answer", "")[:int(cfg["capture.maxanswerchars"])]
+        related = search_current(terms(prompt + " " + answer[:4000]), limit=5)
+        memories = "\n\n".join(f"### {path}\n{(VAULT / path).read_text()}" for path, *_ in related
+                               if (VAULT / path).is_file()) or "(none)"
+        result = parse_json(run_model(agent, CAPTURE_PROMPT.format(
+            cwd=payload.get("cwd", ""), today=time.strftime("%Y-%m-%d"), kinds=", ".join(KINDS),
+            prompt=prompt, answer=answer, memories=memories)))
+        sha = apply_capture(result, agent, session_id)
+        if sha and cfg["sync.push"] == "after-capture":
+            sync(agent)
+        if cfg["recall.prefetch"] == "true" and result.get("next_terms"):
+            state = load_session(session_id)
+            state["prefetched"] = [p for p, *_ in search_current(terms(str(result["next_terms"])), limit=10)
+                                   if p not in state["seen"]][:int(cfg["recall.maxmemories"])]
+            save_session(session_id, state)
+        log = lock_path.parent / "capture.log"
+        with open(log, "a") as f:
+            f.write(f"{time.strftime('%F %T')} {agent} {session_id}: {sha or 'nothing new'}\n")
 
 
 def cmd_agent_hook(args):
+    if os.environ.get("MEMORYTREE_NESTED"):
+        return 0  # the capture model's own session must not recall or capture
     try:
         out = AGENT_EVENTS[args.event](json.load(sys.stdin), args.agent)
     except Exception as e:  # a memory hook must never break the user's session
@@ -596,6 +843,10 @@ def main(argv=None):
     p.add_argument("event", choices=AGENT_EVENTS)
     p.add_argument("agent", choices=GLOBAL_INSTRUCTIONS)
     p.set_defaults(func=cmd_agent_hook)
+
+    p = sub.add_parser("capture", help="(internal) capture one queued turn; run detached by the stop hook")
+    p.add_argument("job")
+    p.set_defaults(func=cmd_capture)
 
     p = sub.add_parser("hook", help="(internal) git hooks installed in the vault by init")
     p.add_argument("name", choices=("pre-commit", "commit-msg"))
