@@ -6,8 +6,8 @@ The stone, broken into pieces. Milestones are outcomes, sprints are batches of w
 
 ### M1 Core vault: `memorytree init` creates a working vault
 
-1. [ ] `cli-skeleton`: a single-file Python CLI using only the standard library. Done when `memorytree --help` lists the commands.
-2. [ ] `config`: defaults, read through `git config -f`, with `.git/config` overrides. Done when a missing key returns its default.
+1. [x] `cli-skeleton`: a single-file Python CLI using only the standard library. Done when `memorytree --help` lists the commands.
+2. [x] `config`: defaults, read through `git config -f`, with `.git/config` overrides. Done when a missing key returns its default.
 3. [ ] `init-vault`: create or clone the vault, create the layout, generate the config and `COMMANDMENTS.md`. Done when `init` on an empty home gives a committed vault.
 4. [ ] `commit-format`: `memorytree commit` writes the subject, body and trailers. Done when a malformed message is refused.
 5. [ ] `vault-git-hooks`: a pre-commit hook (layout, front matter, secret scan, pinned protection) and a commit-msg hook (format, trailers). Done when bad commits are refused even from plain `git commit`.

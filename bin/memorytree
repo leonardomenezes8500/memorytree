@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""memorytree: git for AI memory. See DESIGN.md."""
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+VERSION = "0.1.0"
+VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
+CONFIG = VAULT / "config"
+
+DEFAULT_CONFIG = """\
+# memorytree settings. Read with: git config -f ~/.memorytree/config <key>
+# Per-machine overrides: git -C ~/.memorytree config memorytree.<key> <value>
+
+[core]
+    version = 1
+[recall]
+    maxMemories = 3          # memories injected per prompt
+    maxChars = 1500          # characters per injected memory
+    minScore = 2.0           # BM25 cutoff, applied once the vault has 30+ memories
+    prefetch = true          # meaning-based recall through the capture call
+    blockingExpand = false   # also expand each prompt synchronously (~4 s per prompt)
+[capture]
+    enabled = true
+    maxPromptChars = 6000
+    maxAnswerChars = 12000
+[sync]
+    pull = session-start     # session-start | never
+    push = after-capture     # after-capture | manual
+[agent "claude-code"]
+    captureModel = haiku
+    expandModel = haiku
+[agent "codex"]
+    captureModel = gpt-6-luna
+    expandModel = gpt-6-luna
+    reasoningEffort = low
+"""
+
+
+def git(*args, cwd=VAULT, check=True, input=None):
+    return subprocess.run(["git", *args], cwd=cwd, check=check, capture_output=True, text=True, input=input)
+
+
+def canonical(key):
+    """git lowercases section and variable names, never the subsection."""
+    parts = key.split(".")
+    return ".".join([parts[0].lower(), *parts[1:-1], parts[-1].lower()])
+
+
+def read_config(text):
+    out = git("config", "-f", "-", "--list", cwd=None, input=text).stdout
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+
+DEFAULTS = read_config(DEFAULT_CONFIG)
+
+
+def config():
+    """Defaults, then the vault's config file, then per-machine overrides in .git/config."""
+    values = dict(DEFAULTS)
+    if CONFIG.is_file():
+        values.update(read_config(CONFIG.read_text()))
+    if (VAULT / ".git").is_dir():
+        out = git("config", "--get-regexp", r"^memorytree\.", check=False).stdout
+        for line in out.splitlines():
+            key, _, value = line.partition(" ")
+            values[key.removeprefix("memorytree.")] = value
+    return values
+
+
+def cmd_config(args):
+    values = config()
+    if args.key is None:
+        print("\n".join(f"{k}={v}" for k, v in sorted(values.items())))
+        return 0
+    key = canonical(args.key)
+    if key not in values:
+        print(f"memorytree: unknown key {args.key}", file=sys.stderr)
+        return 1
+    print(values[key])
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="memorytree", description="Git for AI memory.")
+    parser.add_argument("--version", action="version", version=f"memorytree {VERSION}")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("config", help="print settings (all, or one key)")
+    p.add_argument("key", nargs="?")
+    p.set_defaults(func=cmd_config)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
