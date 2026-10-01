@@ -467,8 +467,10 @@ def on_session_start(event, agent):
         save_session(event.get("session_id"), {"seen": [], "prompt": ""})
     if config()["sync.pull"] == "session-start" and git("remote", check=False).stdout.strip():
         detach("git", "pull", "-q", "--rebase", "--autostash")
+    # Plugin updates move this script, so re-point the vault's git hooks and the commandments block at it.
+    install_hooks()
     if BLOCK.search(GLOBAL_INSTRUCTIONS[agent].read_text() if GLOBAL_INSTRUCTIONS[agent].is_file() else ""):
-        install_commandments(agent)  # keep the block in step with the vault's COMMANDMENTS.md
+        install_commandments(agent)
     parts = [f"memorytree is active (vault: {VAULT}). Memories relevant to each prompt are injected "
              f"automatically; search deeper with `python3 {Path(__file__).resolve()} search <english terms> [-d 1-5]`."]
     for rel in ["user/profile.md", *sorted(str(p.relative_to(VAULT)) for p in (VAULT / "pinned").glob("*.md"))]:
@@ -787,6 +789,8 @@ def cmd_agent_hook(args):
 def cmd_init(args):
     if args.clone and not VAULT.exists():
         git("clone", "-q", args.clone, str(VAULT), cwd=None)
+        if git("rev-parse", "-q", "--verify", "HEAD", check=False).returncode:  # empty remote
+            git("symbolic-ref", "HEAD", "refs/heads/main")
     elif not (VAULT / ".git").is_dir():
         VAULT.mkdir(parents=True, exist_ok=True)
         git("init", "-q", "-b", "main")
@@ -800,6 +804,8 @@ def cmd_init(args):
         commit(build_message("init", ["memorytree"], "create vault",
                              "Default config and the commandments every agent follows.",
                              Agent=args.agent), created)
+    if created and git("remote", check=False).stdout.strip():
+        git("push", "-q", "-u", "origin", "main", check=False)
     print(f"memorytree vault ready at {VAULT}" + (f" (created {', '.join(created)})" if created else ""))
     return 0
 
