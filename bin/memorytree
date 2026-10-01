@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.14"
+VERSION = "0.1.15"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -99,7 +99,7 @@ COMMANDMENTS = """\
 Your only memory is the git vault ~/.memorytree; never use or write built-in memory. Relevant memories arrive with each prompt and capture is automatic.
 - An unknown name, project, decision or preference: `memorytree search <english terms> [-d 1-5]` before asking or exploring. Always English.
 - History says why: before proposing an idea, check it wasn't already tried and dropped.
-- "Where did we stop?": `git -C ~/.memorytree log -10 --stat`, then the project's plan (its ROADMAP.md, tracker or README) and recent git log. Never read a whole codebase to find out.
+- "Where did we stop?": `git -C ~/.memorytree log -10 --format='%cs %s'`, then the project's plan (its ROADMAP.md, tracker or README) and recent git log. Never read a whole codebase to find out.
 - Pinned rules change only on the user's explicit request. Never store secret values.
 - Memory is compiled for tokens (core.mode, economy by default): dense facts, no filler or repetition; every pinned memory carries a one-line `rule:`.
 """
