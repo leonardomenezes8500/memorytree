@@ -1,7 +1,7 @@
 {
   "name": "memorytree",
   "description": "Git for AI memory: one memory shared by Claude Code and Codex across machines, recalled on every prompt and captured after every turn.",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "author": { "name": "Leonardo Menezes", "url": "https://github.com/leonardomenezes8500" },
   "homepage": "https://github.com/leonardomenezes8500/memorytree",
   "repository": "https://github.com/leonardomenezes8500/memorytree",

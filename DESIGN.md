@@ -40,7 +40,7 @@ Every edge is derived from plain git data. No separate graph database exists, an
 1. **Git is the engine.** memorytree adds memory semantics on top of git and never reimplements what git already does: storage, hashing, history, search, sync, merge, config, hooks.
 2. **Minimal dependencies.** Git is required. Python 3 (standard library only) runs the hooks and the search index (Q1).
 3. **No escape.** While memorytree is active, an agent cannot skip reading it or save memory anywhere else (section 9).
-4. **Recall only what matters, compiled for tokens.** Inject the relevant slice, never the whole store, and keep everything compact, including the agents' instruction files (CLAUDE.md, AGENTS.md), while project docs (README, DESIGN, ROADMAP), read only on demand, stay descriptive: `core.mode = economy` (the default) has memories written as dense facts and loads each pinned memory as its one-line `rule:`; `full` trades tokens for prose.
+4. **Memory is for models, docs are for people.** Whatever loads into an agent's context on its own (memories, pinned rules, the commandments, CLAUDE.md, AGENTS.md) is compiled for tokens: inject the relevant slice, never the whole store, as dense facts. `core.mode = economy` (the default) loads each pinned memory as its one-line `rule:`; `full` trades tokens for prose. A PreToolUse hook (Claude Code; Codex has none) refuses an edit that grows a CLAUDE.md or AGENTS.md past `core.maxInstructionChars`. Project docs (README, DESIGN, ROADMAP) are read on demand by people and agents alike, so they are written for humans: descriptive, the why in full, never compressed to save tokens. The instruction file links to them instead of repeating them.
 5. **English, always.** Code, docs, memories, keywords and commit messages are in English. The only exception is text that must be kept verbatim in its original language (a quote, a hardcoded UI string); it is stored as-is and marked as verbatim.
 6. **The user owns the data.** The vault is a private repository the user controls. memorytree ships no server and no telemetry.
 
@@ -203,6 +203,7 @@ Every tunable lives in the config file, including which model each agent uses fo
 [core]
     version = 1
     mode = economy           # economy | full: how compact memories, pinned rules and commandments are kept
+    maxInstructionChars = 4000  # a CLAUDE.md/AGENTS.md edit may not grow it past this
 [recall]
     maxMemories = 3          # memories injected per prompt
     maxChars = 1500          # characters per injected memory

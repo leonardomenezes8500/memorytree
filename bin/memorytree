@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.19"
+VERSION = "0.1.20"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -27,6 +27,7 @@ DEFAULT_CONFIG = """\
 [core]
     version = 1
     mode = economy           # economy | full: how compact memories, pinned rules and commandments are kept
+    maxInstructionChars = 4000  # a CLAUDE.md/AGENTS.md edit may not grow it past this
 [recall]
     maxMemories = 3          # memories injected per prompt
     maxChars = 1500          # characters per injected memory
@@ -102,7 +103,7 @@ Your only memory is the git vault ~/.memorytree; never use or write built-in mem
 - History says why: before proposing an idea, check it wasn't already tried and dropped.
 - "Where did we stop?": `git -C ~/.memorytree log -10 --format='%cs %s'`, then the project's plan (its ROADMAP.md, tracker or README) and recent git log. Never read a whole codebase to find out.
 - Pinned rules change only on the user's explicit request. Never store secret values.
-- Everything loaded into context is compiled for tokens (core.mode, economy by default): memories, pinned rules, CLAUDE.md, AGENTS.md. Dense facts, no filler or repetition, link depth instead of inlining it; every pinned memory carries a one-line `rule:`. Project docs (README, DESIGN, ROADMAP) load on demand: descriptive, the why in full.
+- Everything loaded into context is compiled for tokens (core.mode, economy by default): memories, pinned rules, CLAUDE.md, AGENTS.md. Dense facts, no filler or repetition, link depth instead of inlining it; every pinned memory carries a one-line `rule:`. Project docs (README, DESIGN, ROADMAP) are for people, read on demand: human-friendly, the why in full.
 """
 
 KINDS = ("fact", "decision", "preference", "correction", "idea", "abandon", "migrate", "pin", "unpin",
@@ -560,14 +561,30 @@ NATIVE_MEMORY_PATHS = (re.compile(re.escape(str(CLAUDE_HOME / "projects")) + r"/
                        re.compile(re.escape(str(CODEX_HOME / "memories")) + "/"))
 
 
+def deny(reason):
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
+
+
 def on_tool(event, agent):
-    """Deny writes to built-in memory locations: memorytree is the only memory."""
-    path = str((event.get("tool_input") or {}).get("file_path", ""))
+    """Deny writes to built-in memory locations, and instruction files grown past the token budget."""
+    tool = event.get("tool_input") or {}
+    path = str(tool.get("file_path", ""))
     if path and any(p.match(str(Path(path).expanduser())) for p in NATIVE_MEMORY_PATHS):
-        return json.dumps({"hookSpecificOutput": {
-            "hookEventName": "PreToolUse", "permissionDecision": "deny",
-            "permissionDecisionReason": "memorytree is the only memory: built-in memory files are off limits. "
-                                        "Record this in memorytree instead."}})
+        return deny("memorytree is the only memory: built-in memory files are off limits. "
+                    "Record this in memorytree instead.")
+    if Path(path).name in ("CLAUDE.md", "AGENTS.md"):
+        file = Path(path).expanduser()
+        old = file.read_text() if file.is_file() else ""
+        new = tool["content"] if "content" in tool else \
+            old.replace(tool.get("old_string", ""), tool.get("new_string", ""), -1 if tool.get("replace_all") else 1)
+        limit = int(config()["core.maxinstructionchars"])
+        # Shrinking is always allowed, so a file already over the limit can be compiled step by step.
+        if len(new) > limit and len(new) >= len(old):
+            return deny(f"{file.name} would be {len(new)} chars, over core.maxInstructionChars ({limit}). "
+                        "It loads every session, so it is written for the model: one dense line per rule. "
+                        "Move detail and the why to README/DESIGN/docs (read on demand, written for people) "
+                        "and link them.")
     return ""
 
 

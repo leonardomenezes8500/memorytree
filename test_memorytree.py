@@ -176,6 +176,15 @@ assert "NOT active" in hook("session-start", "codex", {"session_id": "c1"})["add
 denied = hook("tool", "claude-code", {"tool_input": {"file_path": str(HOMES / "claude/projects/x/memory/a.md")}})
 assert denied["permissionDecision"] == "deny"
 assert hook("tool", "claude-code", {"tool_input": {"file_path": str(VAULT / "topics/a.md")}}) is None
+# instruction files stay within the token budget; shrinking an oversized one is always allowed
+big = HOMES / "proj" / "CLAUDE.md"
+big.parent.mkdir(parents=True)
+assert hook("tool", "claude-code", {"tool_input": {"file_path": str(big), "content": "x" * 3000}}) is None
+assert hook("tool", "claude-code", {"tool_input": {"file_path": str(big), "content": "x" * 5000}})["permissionDecision"] == "deny"
+big.write_text("x" * 6000 + "tail")
+grow = {"file_path": str(big), "old_string": "tail", "new_string": "tail and more"}
+assert hook("tool", "claude-code", {"tool_input": grow})["permissionDecision"] == "deny"
+assert hook("tool", "claude-code", {"tool_input": {**grow, "new_string": ""}}) is None
 
 # hook-session-start: profile and pinned memories are loaded
 (VAULT / "user").mkdir(exist_ok=True)
@@ -202,7 +211,7 @@ assert len(claude_md) < 1600  # the block loads every session: keep it small
 assert "Hook check" in claude_md and "/hooks" in claude_md  # tells the user when hooks are not running
 assert "# Pinned rules\n- Keep it simple." in claude_md  # subagents read this file too; economy loads the rule
 assert "core.mode" in claude_md and "AGENTS.md" in claude_md  # token rule covers instruction files too
-assert "load on demand: descriptive" in claude_md  # project docs are not compiled
+assert "are for people" in claude_md  # project docs are human-friendly, not compiled
 subprocess.run(["git", "-C", str(VAULT), "config", "memorytree.core.mode", "full"], check=True)
 mt("install", "claude-code")
 assert "# Pinned rules\n- Body." in (HOMES / "claude" / "CLAUDE.md").read_text()  # full mode loads the whole pin
