@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.11"
+VERSION = "0.1.12"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -103,7 +103,8 @@ COMMANDMENTS = """\
 5. Capture is automatic. When the user corrects you, decides something or endorses something, make sure it reaches memorytree as a commit in the memorytree format.
 6. Pinned memories change only when the user explicitly asks.
 7. One memory per subject: edit it, don't duplicate it. Never store secret values, only where they live.
-8. Before working in a project repository, read its ROADMAP.md. Take the next unchecked issue unless told otherwise, and check it off in the commit that finishes it.
+8. Before working in a project, find its plan the way that project keeps it: a ROADMAP.md or similar file, the issue tracker named in its CLAUDE.md/AGENTS.md or README. If it keeps no plan, its recent `git log` plus its memories here are the plan. Never read the whole codebase just to learn where things stand. When work finishes a planned item, mark it done the way the project tracks it.
+9. When the user asks where things stopped ("where were we?"), answer from the latest memory events injected at session start, the memories they touched, and the project's plan and recent `git log`. Don't make the user re-explain.
 """
 
 KINDS = ("fact", "decision", "preference", "correction", "idea", "abandon", "migrate", "pin", "unpin",

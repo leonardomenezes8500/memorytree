@@ -255,7 +255,7 @@ Every project is broken down **inside its own repository**, in a `ROADMAP.md` at
 
 memorytree's role:
 
-- The commandments tell agents to read `ROADMAP.md` before working in a repo, take the next unchecked issue unless told otherwise, and check it off in the commit that finishes it.
+- The commandments tell agents to read the project's plan before working in it: `ROADMAP.md` for projects that follow this standard, otherwise whatever the project uses (an issue tracker named in its instructions, its README); with no plan at all, the project's recent `git log` plus its vault memories. Never the whole codebase. memorytree works the same for users who don't follow this standard.
 - The capture call records progress in the vault (`progress` and `close` events with `Issue:` trailers) along with the context and decisions behind the work, which the roadmap file does not hold.
 - `memorytree status [project]` reads `ROADMAP.md` across the user's known projects and shows milestone progress and the current sprint.
 - The vault keeps the memory *about* a project (`projects/<name>/`: overview, decisions, where it lives). The repo keeps its *plan*. Neither duplicates the other.
