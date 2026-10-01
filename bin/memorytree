@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.13"
+VERSION = "0.1.14"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -26,6 +26,7 @@ DEFAULT_CONFIG = """\
 
 [core]
     version = 1
+    mode = economy           # economy | full: how compact memories, pinned rules and commandments are kept
 [recall]
     maxMemories = 3          # memories injected per prompt
     maxChars = 1500          # characters per injected memory
@@ -100,6 +101,7 @@ Your only memory is the git vault ~/.memorytree; never use or write built-in mem
 - History says why: before proposing an idea, check it wasn't already tried and dropped.
 - "Where did we stop?": `git -C ~/.memorytree log -10 --stat`, then the project's plan (its ROADMAP.md, tracker or README) and recent git log. Never read a whole codebase to find out.
 - Pinned rules change only on the user's explicit request. Never store secret values.
+- Memory is compiled for tokens (core.mode, economy by default): dense facts, no filler or repetition; every pinned memory carries a one-line `rule:`.
 """
 
 KINDS = ("fact", "decision", "preference", "correction", "idea", "abandon", "migrate", "pin", "unpin",
@@ -200,6 +202,9 @@ def check_staged():
         text = git("show", f":{path}").stdout
         if SECRET.search(text):
             errors.append(f"{path}: contains what looks like a secret value; record where it lives instead")
+        if path.startswith("pinned/") and config()["core.mode"] == "economy" and \
+                not re.match(r"---\n(.*\n)*?rule: *\S.*\n(.*\n)*?---\n", text):
+            errors.append(f"{path}: economy mode needs a one-line 'rule:' in the front matter of every pinned memory")
         if "/" in path and not re.match(r"---\n(.*\n)*?title: *\S.*\n(.*\n)*?---\n", text):
             errors.append(f"{path}: needs front matter with a title")
     return errors
@@ -398,7 +403,9 @@ def commandments_block():
     text += ("\nHook check: if your context lacks \"memorytree is active\", tell the user first that its hooks aren't "
              "running (Codex: trust them in /hooks; Claude Code: enable the plugin), then to start a new session.")
     # Each pin's one-line `rule` is what loads every session; its full text stays in the vault, a search away.
-    pins = [f"- {meta.get('rule') or ' '.join(body.split())}" for rel, meta, body in pinned_memories()]
+    full = config()["core.mode"] == "full"
+    pins = [f"- {' '.join(body.split()) if full else meta.get('rule') or ' '.join(body.split())}"
+            for rel, meta, body in pinned_memories()]
     if pins:
         text += "\n\n# Pinned rules\n" + "\n".join(pins)
     return f"<!-- memorytree -->\n{text}\n<!-- /memorytree -->\n"
@@ -612,7 +619,8 @@ Decide what from this exchange is worth remembering in future sessions:
 Skip what is transient, obvious from code or git history, or already recorded. Most exchanges contain nothing new.
 
 Rules:
-- English only, concise and factual, even when the user writes in another language. Today is {today}.
+- English only, factual, even when the user writes in another language. Today is {today}.
+- {style}
 - Paths: user/profile.md (stable facts about the user, under 40 lines), projects/<name>/<file>.md, env/<file>.md, \
 topics/<file>.md. Lowercase, hyphens, .md. One memory per subject: to change one, return its full new content under \
 the same path. Link related memories with [[path-without-.md]].
@@ -622,7 +630,8 @@ then the commit kind is pin or unpin. Praise without an explicit request is a pr
 - The commit body says why, and what was ruled out. That is how the path from one idea to the next is remembered.
 
 Return ONLY JSON:
-{{"memories": [{{"path": "...", "title": "...", "keywords": "english search terms", "body": "markdown"}}, \
+{{"memories": [{{"path": "...", "title": "...", "keywords": "english search terms", "body": "markdown", \
+"rule": "pinned only"}}, \
 {{"path": "...", "delete": true}}],
  "commit": {{"kind": "one of {kinds}", "topics": ["main-topic"], "summary": "imperative, under 60 characters", \
 "body": "why"}},
@@ -654,6 +663,11 @@ matter format. Return ONLY the merged file content.
 {b}
 </version_b>
 """
+STYLE = {
+    "economy": "Compile every memory for tokens: dense bullet facts, no filler, no repetition, no restating the title; "
+               "keep each file under 1,000 characters. A pinned memory also needs \"rule\": its one-line form.",
+    "full": "Write each memory as clear prose with the context a reader needs.",
+}
 MEMORY_PATH = re.compile(r"(user|pinned|projects|env|topics)(/[a-z0-9][a-z0-9_.-]*)+\.md")
 
 
@@ -710,8 +724,9 @@ def apply_capture(result, agent, session_id):
             continue
         one_line = lambda v: " ".join(str(v).split())
         target.parent.mkdir(parents=True, exist_ok=True)
+        rule = f"rule: {one_line(item['rule'])}\n" if path.startswith("pinned/") and item.get("rule") else ""
         target.write_text(SECRET.sub("[REDACTED]", f"---\ntitle: {one_line(item.get('title') or target.stem)}\n"
-                                                   f"keywords: {one_line(item.get('keywords', ''))}\n---\n\n{body}\n"))
+                                                   f"keywords: {one_line(item.get('keywords', ''))}\n{rule}---\n\n{body}\n"))
         written.append(path)
     if not written:
         return None
@@ -801,6 +816,7 @@ def capture(payload):
                                if (VAULT / path).is_file()) or "(none)"
         result = parse_json(run_model(agent, CAPTURE_PROMPT.format(
             cwd=payload.get("cwd", ""), today=time.strftime("%Y-%m-%d"), kinds=", ".join(KINDS),
+            style=STYLE.get(cfg["core.mode"], STYLE["economy"]),
             prompt=prompt, answer=answer, memories=memories)))
         sha = apply_capture(result, agent, session_id)
         if sha and cfg["sync.push"] == "after-capture":

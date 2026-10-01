@@ -89,8 +89,10 @@ assert not plain_commit("env/d.md", "no front matter\n", FACT)
 assert not plain_commit("env/e.txt", "text\n", FACT)  # not markdown
 assert not plain_commit("env/f.md", NOTE + "token ghp_" + "a" * 36 + "\n", FACT)  # secret
 assert not plain_commit("pinned/style.md", NOTE, "fact(style): x\n\nKind: fact\nTopic: style\n")
-assert plain_commit("pinned/style.md", NOTE, "pin(style): simple first\n\nKind: pin\nTopic: style\n")
-assert not plain_commit("pinned/style.md", NOTE + "edited\n", "fact(style): x\n\nKind: fact\nTopic: style\n")
+assert not plain_commit("pinned/style.md", NOTE, "pin(style): simple first\n\nKind: pin\nTopic: style\n")  # no rule
+PIN = "---\ntitle: T\nrule: Keep it simple.\n---\n\nBody.\n"
+assert plain_commit("pinned/style.md", PIN, "pin(style): simple first\n\nKind: pin\nTopic: style\n")
+assert not plain_commit("pinned/style.md", PIN + "edited\n", "fact(style): x\n\nKind: fact\nTopic: style\n")
 
 
 # search: index files and history on main, walk the depth levels in order
@@ -198,7 +200,13 @@ claude_md = (HOMES / "claude" / "CLAUDE.md").read_text()
 assert claude_md.startswith("# my rules") and "<!-- memorytree -->" in claude_md and "search <english" in claude_md
 assert len(claude_md) < 1600  # the block loads every session: keep it small
 assert "Hook check" in claude_md and "/hooks" in claude_md  # tells the user when hooks are not running
-assert "# Pinned rules\n- Body." in claude_md  # subagents read this file too; a pin without `rule` loads its body
+assert "# Pinned rules\n- Keep it simple." in claude_md  # subagents read this file too; economy loads the rule
+assert "core.mode" in claude_md  # the token rule is itself a commandment
+subprocess.run(["git", "-C", str(VAULT), "config", "memorytree.core.mode", "full"], check=True)
+mt("install", "claude-code")
+assert "# Pinned rules\n- Body." in (HOMES / "claude" / "CLAUDE.md").read_text()  # full mode loads the whole pin
+subprocess.run(["git", "-C", str(VAULT), "config", "--unset", "memorytree.core.mode"], check=True)
+mt("install", "claude-code")
 start = hook("session-start", "claude-code", {"session_id": "s10", "source": "startup"})["additionalContext"]
 assert "Dante" in start and "pinned/style.md" not in start  # not injected twice
 assert "memory events" not in start  # history loads only on request
