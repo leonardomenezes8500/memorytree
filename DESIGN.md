@@ -53,6 +53,7 @@ Every edge is derived from plain git data. No separate graph database exists, an
   COMMANDMENTS.md              the rules every agent follows (section 8)
   user/
     profile.md                 who the user is and how agents should behave (always loaded)
+  pinned/<slug>.md             memories the user explicitly endorsed (always loaded, protected)
   projects/<name>/
     overview.md                purpose, status, where it lives
     decisions.md               current decisions (the history holds the path)
@@ -105,7 +106,7 @@ Session: 8a50c254
 
 | Trailer | Values | Purpose |
 |---|---|---|
-| `Kind` | memory: `fact`, `decision`, `preference`, `correction`, `idea`, `abandon`, `migrate`; tracking: `issue`, `progress`, `close`, `milestone`, `sprint`, `release` | the type of event; filter history by it |
+| `Kind` | memory: `fact`, `decision`, `preference`, `correction`, `idea`, `abandon`, `migrate`, `pin`, `unpin`; tracking: `issue`, `progress`, `close`, `milestone`, `sprint`, `release` | the type of event; filter history by it |
 | `Issue` | `<project>/<slug>` | tracking edge: the issue this commit opens, advances or closes (section 14) |
 | `Topic` | comma-separated | cross-cutting index, independent of folders |
 | `Supersedes` | commit hash | explicit time edge: this replaces that |
@@ -139,7 +140,7 @@ Branches and tags are different things: a **branch** is a pointer that moves (a 
 
 | Level | Git object | Holds | Abstraction | Loaded |
 |---|---|---|---|---|
-| 0 | `main:user/profile.md` | who the user is, how agents behave | identity | every session |
+| 0 | `main:user/profile.md`, `main:pinned/` | who the user is, how agents behave, what the user explicitly endorsed | identity | every session |
 | 1 | files on `main` | current truth: facts, decisions, preferences | concrete | injected per prompt when relevant |
 | 2 | history of `main` (messages, trailers, diffs) | how and why things changed: the path from A to D | causal | on search |
 | 3 | branches `explore/<idea>` | live alternatives still being developed, not accepted yet | hypothetical | on search, only when the idea comes up |
@@ -147,6 +148,15 @@ Branches and tags are different things: a **branch** is a pointer that moves (a 
 | 5 | notes `refs/notes/hindsight` | judgments made later about old commits, and patterns across ideas ("this user tends to start big and simplify") | reflective | on explicit search; patterns that prove stable get promoted to level 0 |
 
 Lifecycle of an idea: it starts on `explore/<idea>`. If accepted, it is merged into `main` and the branch is deleted (history keeps it). If abandoned, it is tagged `archived/<idea>` with an `abandon` commit explaining why, and the branch is deleted. Hindsight about either outcome goes to level 5.
+
+## 7b. Pinned memories
+
+Most memories are inferred: the capture model decides what was worth keeping. A **pinned** memory is different, because the user endorsed it explicitly ("I want this as a standard", "pin this"). It is the strongest signal there is.
+
+- Lives in `pinned/<slug>.md` and is loaded in every session with the profile (level 0). There are few of them and they are short.
+- Protected: the capture model may never edit or delete one. Only an explicit user request changes it, through a `pin` or `unpin` commit. The pre-commit hook rejects any other commit that touches `pinned/`.
+- When the user praises something without asking to pin it, the capture model records it as a `preference` and suggests pinning it. It never pins on its own.
+- `git log --grep "Kind: pin"` is the history of everything the user has endorsed.
 
 ## 8. Commandments
 
@@ -272,3 +282,10 @@ Goal, acceptance criteria, notes.
 - **Q5 Capture:** runs after every turn, in the background, with no latency for the user.
 - **Q6 Agents:** Claude Code and Codex first. Other major agents (Cursor, Gemini CLI, …) are a roadmap issue.
 - **Q7 Tracking:** memorytree holds milestones, issues and sprints (section 14). No hosted issue tracker is used, including for memorytree itself.
+
+## 16. First memories
+
+The first memories the user wants pinned once memorytree runs:
+
+1. **Simple first, depth on demand** (2026-09-30). Any doc, README or answer opens with the shortest form that says what it is and why, in a few direct lines, and links to the deeper material (e.g. `DESIGN.md`) instead of inlining it. The reference example is this repository's README.
+
