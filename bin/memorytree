@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """memorytree: git for AI memory. See DESIGN.md."""
 import argparse
+import json
 import os
 import re
 import socket
 import sqlite3
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 VERSION = "0.1.0"
@@ -367,6 +369,174 @@ def cmd_search(args):
     return 0 if found else 1
 
 
+CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
+CODEX_HOME = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+GLOBAL_INSTRUCTIONS = {"claude-code": CLAUDE_HOME / "CLAUDE.md", "codex": CODEX_HOME / "AGENTS.md"}
+BLOCK = re.compile(r"<!-- memorytree -->\n.*?<!-- /memorytree -->\n?", re.S)
+
+
+def commandments_block():
+    text = (VAULT / "COMMANDMENTS.md").read_text() if (VAULT / "COMMANDMENTS.md").is_file() else COMMANDMENTS
+    text = text.replace("`memorytree search", f"`python3 {Path(__file__).resolve()} search")
+    return f"<!-- memorytree -->\n{text.strip()}\n<!-- /memorytree -->\n"
+
+
+def install_commandments(agent, remove=False):
+    """Write (or refresh, or remove) the commandments block in the agent's global instructions."""
+    path = GLOBAL_INSTRUCTIONS[agent]
+    old = path.read_text() if path.is_file() else ""
+    rest = BLOCK.sub("", old)
+    new = rest if remove else (rest.rstrip() + "\n\n" if rest.strip() else "") + commandments_block()
+    if new != old:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(new)
+    return new != old
+
+
+def cmd_install(args):
+    for agent in args.agents or GLOBAL_INSTRUCTIONS:
+        changed = install_commandments(agent, remove=args.uninstall)
+        print(f"{GLOBAL_INSTRUCTIONS[agent]}: {'updated' if changed else 'unchanged'}")
+    return 0
+
+
+def native_memory_on(agent):
+    """Why the agent's built-in memory is on, or None. memorytree refuses to run alongside it."""
+    if agent == "claude-code":
+        if os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY") == "1":
+            return None
+        try:
+            settings = json.loads((CLAUDE_HOME / "settings.json").read_text())
+        except (OSError, ValueError):
+            settings = {}
+        if settings.get("autoMemoryEnabled", True) is not False:
+            return f'Claude Code auto memory is on (set "autoMemoryEnabled": false in {CLAUDE_HOME / "settings.json"})'
+    if agent == "codex":
+        try:
+            settings = tomllib.loads((CODEX_HOME / "config.toml").read_text())
+        except (OSError, ValueError):
+            settings = {}
+        if settings.get("features", {}).get("memories") is True:
+            return f"Codex memories are on (set memories = false under [features] in {CODEX_HOME / 'config.toml'})"
+    return None
+
+
+def context(event, text):
+    return json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
+
+
+def session_path(session_id):
+    safe = re.sub(r"[^A-Za-z0-9_-]", "", str(session_id))[:100] or "unknown"
+    return Path(git("rev-parse", "--absolute-git-dir").stdout.strip()) / "memorytree" / "sessions" / f"{safe}.json"
+
+
+def load_session(session_id):
+    try:
+        return json.loads(session_path(session_id).read_text())
+    except (OSError, ValueError):
+        return {"seen": [], "prompt": ""}
+
+
+def save_session(session_id, state):
+    path = session_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state))
+
+
+def detach(*command):
+    subprocess.Popen(command, cwd=VAULT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def on_session_start(event, agent):
+    if not (VAULT / ".git").is_dir():
+        return context("SessionStart", f"memorytree is installed but has no vault at {VAULT}. "
+                       "Tell the user once and offer to run the memorytree setup.")
+    reason = native_memory_on(agent)
+    if reason:
+        return context("SessionStart", f"memorytree is NOT active: {reason}. memorytree refuses to run alongside "
+                       "built-in memory. Tell the user and offer to turn it off; nothing is recalled or captured "
+                       "until then.")
+    if event.get("source") in ("clear", "compact"):
+        save_session(event.get("session_id"), {"seen": [], "prompt": ""})
+    if config()["sync.pull"] == "session-start" and git("remote", check=False).stdout.strip():
+        detach("git", "pull", "-q", "--rebase", "--autostash")
+    if BLOCK.search(GLOBAL_INSTRUCTIONS[agent].read_text() if GLOBAL_INSTRUCTIONS[agent].is_file() else ""):
+        install_commandments(agent)  # keep the block in step with the vault's COMMANDMENTS.md
+    parts = [f"memorytree is active (vault: {VAULT}). Memories relevant to each prompt are injected "
+             f"automatically; search deeper with `python3 {Path(__file__).resolve()} search <english terms> [-d 1-5]`."]
+    for rel in ["user/profile.md", *sorted(str(p.relative_to(VAULT)) for p in (VAULT / "pinned").glob("*.md"))]:
+        if (VAULT / rel).is_file():
+            meta, body = front_matter((VAULT / rel).read_text())
+            parts.append(f"## {meta.get('title', rel)} ({rel})\n{body}")
+    return context("SessionStart", "\n\n".join(parts))
+
+
+def recall(prompt, session_id):
+    """Memories for this prompt: FTS hits on main, each at most once per session."""
+    cfg = config()
+    limit, max_chars = int(cfg["recall.maxmemories"]), int(cfg["recall.maxchars"])
+    state = load_session(session_id)
+    state["prompt"] = prompt
+    words = terms(prompt)
+    hits = []
+    if words:
+        db = index()
+        # BM25's IDF is ~0 in a tiny corpus, so the cutoff only means something once the vault has grown.
+        min_score = float(cfg["recall.minscore"]) if db.execute("select count(*) from files").fetchone()[0] >= 30 else 0
+        rows = db.execute(
+            "select path, title, body, -bm25(files, 5.0, 10.0, 5.0, 1.0) as score from files "
+            "where files match ? order by score desc limit ?", (fts_query(words), limit + len(state["seen"]) + 10))
+        for path, title, body, score in rows:
+            if score >= min_score and path not in state["seen"] and not path.startswith(("user/", "pinned/")):
+                hits.append((path, title, body if len(body) <= max_chars else body[:max_chars] + " [...]"))
+            if len(hits) == limit:
+                break
+    state["seen"] += [h[0] for h in hits]
+    save_session(session_id, state)
+    return hits
+
+
+def on_prompt(event, agent):
+    if not (VAULT / ".git").is_dir() or native_memory_on(agent):
+        return ""
+    hits = recall(event.get("prompt") or "", event.get("session_id"))
+    if not hits:
+        return ""
+    text = "Memories recalled by memorytree for this prompt:\n\n" + "\n\n".join(
+        f"## {title} ({path})\n{body}" for path, title, body in hits)
+    return context("UserPromptSubmit", text)
+
+
+NATIVE_MEMORY_PATHS = (re.compile(re.escape(str(CLAUDE_HOME / "projects")) + r"/[^/]+/memory/"),
+                       re.compile(re.escape(str(CODEX_HOME / "memories")) + "/"))
+
+
+def on_tool(event, agent):
+    """Deny writes to built-in memory locations: memorytree is the only memory."""
+    path = str((event.get("tool_input") or {}).get("file_path", ""))
+    if path and any(p.match(str(Path(path).expanduser())) for p in NATIVE_MEMORY_PATHS):
+        return json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny",
+            "permissionDecisionReason": "memorytree is the only memory: built-in memory files are off limits. "
+                                        "Record this in memorytree instead."}})
+    return ""
+
+
+AGENT_EVENTS = {"session-start": on_session_start, "prompt": on_prompt, "tool": on_tool}
+
+
+def cmd_agent_hook(args):
+    try:
+        out = AGENT_EVENTS[args.event](json.load(sys.stdin), args.agent)
+    except Exception as e:  # a memory hook must never break the user's session
+        print(f"memorytree: {e}", file=sys.stderr)
+        out = ""
+    if out:
+        print(out)
+    return 0
+
+
 def cmd_init(args):
     if args.clone and not VAULT.exists():
         git("clone", "-q", args.clone, str(VAULT), cwd=None)
@@ -416,6 +586,16 @@ def main(argv=None):
     p.add_argument("-d", "--depth", type=int, default=2, choices=range(1, 6),
                    help="deepest level to search: 1 current, 2 history (default), 3 explorations, 4 archive, 5 notes")
     p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("install", help="write the commandments into each agent's global instructions")
+    p.add_argument("agents", nargs="*", choices=list(GLOBAL_INSTRUCTIONS))
+    p.add_argument("--uninstall", action="store_true", help="remove the commandments block instead")
+    p.set_defaults(func=cmd_install)
+
+    p = sub.add_parser("agent-hook", help="(internal) Claude Code and Codex hooks shipped by the plugin")
+    p.add_argument("event", choices=AGENT_EVENTS)
+    p.add_argument("agent", choices=GLOBAL_INSTRUCTIONS)
+    p.set_defaults(func=cmd_agent_hook)
 
     p = sub.add_parser("hook", help="(internal) git hooks installed in the vault by init")
     p.add_argument("name", choices=("pre-commit", "commit-msg"))

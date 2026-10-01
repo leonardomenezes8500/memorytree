@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace-manifest.json",
+  "name": "memorytree",
+  "owner": { "name": "Leonardo Menezes", "url": "https://github.com/leonardomenezes8500" },
+  "description": "Git for AI memory.",
+  "plugins": [
+    {
+      "name": "memorytree",
+      "source": "./",
+      "description": "One memory shared by Claude Code and Codex across machines, versioned with git.",
+      "license": "MIT",
+      "keywords": ["memory", "git", "context", "codex", "hooks"]
+    }
+  ]
+}

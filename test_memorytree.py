@@ -1,6 +1,7 @@
 """Run: python3 test_memorytree.py"""
 import importlib.machinery
 import importlib.util
+import json
 import os
 import subprocess
 import tempfile
@@ -131,5 +132,59 @@ assert "level 3" not in mt("search", "embeddings", ok=False)
 deep = mt("search", "embeddings", "graph", "server", "-d", "5")
 assert deep.index("== level 3") < deep.index("topics/vectors.md") < deep.index("== level 4") \
     < deep.index("archived/graph-db") < deep.index("== level 5")
+
+
+# agents: hooks run with JSON on stdin, against a fake Claude/Codex home
+HOMES = TMP / "homes"
+os.environ.update(CLAUDE_CONFIG_DIR=str(HOMES / "claude"), CODEX_HOME=str(HOMES / "codex"))
+os.environ.pop("CLAUDE_CODE_DISABLE_AUTO_MEMORY", None)
+
+
+def hook(event, agent, payload):
+    r = subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "agent-hook", event, agent],
+                       input=json.dumps(payload), capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+
+# native-memory-gate: Claude's auto memory is on by default, so memorytree refuses to run
+out = hook("session-start", "claude-code", {"session_id": "s1", "source": "startup"})
+assert "NOT active" in out["additionalContext"] and "autoMemoryEnabled" in out["additionalContext"]
+assert hook("prompt", "claude-code", {"session_id": "s1", "prompt": "radar"}) is None
+(HOMES / "claude").mkdir(parents=True)
+(HOMES / "claude" / "settings.json").write_text('{"autoMemoryEnabled": false}')
+(HOMES / "codex").mkdir(parents=True)
+(HOMES / "codex" / "config.toml").write_text("[features]\nmemories = true\n")
+assert "NOT active" in hook("session-start", "codex", {"session_id": "c1"})["additionalContext"]
+(HOMES / "codex" / "config.toml").write_text("[features]\nmemories = false\n")
+denied = hook("tool", "claude-code", {"tool_input": {"file_path": str(HOMES / "claude/projects/x/memory/a.md")}})
+assert denied["permissionDecision"] == "deny"
+assert hook("tool", "claude-code", {"tool_input": {"file_path": str(VAULT / "topics/a.md")}}) is None
+
+# hook-session-start: profile and pinned memories are loaded
+(VAULT / "user").mkdir(exist_ok=True)
+(VAULT / "user" / "profile.md").write_text("---\ntitle: Profile\n---\n\nCalls the assistant Dante.\n")
+mt("commit", "-k", "preference", "-t", "user", "-m", "assistant name")
+start = hook("session-start", "codex", {"session_id": "c1", "source": "startup"})["additionalContext"]
+assert "memorytree is active" in start and "Dante" in start and "simple first" not in start.lower()
+assert "## T (pinned/style.md)" in start
+
+# hook-recall: naming a project recalls it, once per session
+first = hook("prompt", "claude-code", {"session_id": "s2", "prompt": "como está o radar?"})
+assert "projects/radar/overview.md" in first["additionalContext"]
+assert hook("prompt", "claude-code", {"session_id": "s2", "prompt": "e o radar?"}) is None
+assert hook("prompt", "claude-code", {"session_id": "s3", "prompt": "ok"}) is None
+hook("session-start", "claude-code", {"session_id": "s2", "source": "clear"})
+assert hook("prompt", "claude-code", {"session_id": "s2", "prompt": "radar"}) is not None
+
+# commandments-install: a marked block, refreshed in place, removable, other content kept
+(HOMES / "claude" / "CLAUDE.md").write_text("# my rules\n\nBe brief.\n")
+mt("install")
+claude_md = (HOMES / "claude" / "CLAUDE.md").read_text()
+assert claude_md.startswith("# my rules") and "<!-- memorytree -->" in claude_md and "search <english" in claude_md
+assert (HOMES / "codex" / "AGENTS.md").read_text().count("<!-- memorytree -->") == 1
+assert "unchanged" in mt("install", "codex")
+mt("install", "--uninstall")
+assert (HOMES / "claude" / "CLAUDE.md").read_text().strip() == "# my rules\n\nBe brief."
 
 print("ok")

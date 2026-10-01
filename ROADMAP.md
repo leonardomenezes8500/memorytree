@@ -23,9 +23,9 @@ The stone, broken into pieces. Milestones are outcomes, sprints are batches of w
 ### M3 Agents: Claude Code and Codex read memorytree on their own
 
 9. [ ] `plugin-manifests`: Claude Code and Codex plugins from one repo, plus a marketplace. Done when both install from GitHub.
-10. [ ] `hook-session-start`: pull, then inject the profile, pinned memories and the commandments pointer. Done when a fresh session knows the user.
-11. [ ] `hook-recall`: inject relevant memories on each prompt, at most once per session. Done when naming a project recalls it.
-12. [ ] `native-memory-gate`: refuse to run while native memory is on, offer to turn it off, and block writes to native memory paths. Done on both agents.
+10. [x] `hook-session-start`: pull, then inject the profile, pinned memories and the commandments pointer. Done when a fresh session knows the user.
+11. [x] `hook-recall`: inject relevant memories on each prompt, at most once per session. Done when naming a project recalls it.
+12. [x] `native-memory-gate`: refuse to run while native memory is on, offer to turn it off, and block writes to native memory paths. Done on both agents.
 13. [ ] `commandments-install`: point `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` at the commandments. Done when both agents follow the search order.
 
 ## Sprint 3
