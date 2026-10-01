@@ -16,9 +16,9 @@ The stone, broken into pieces. Milestones are outcomes, sprints are batches of w
 
 ### M2 Search: find the right memory in ~50 ms
 
-6. [ ] `index-files`: an FTS5 index of the files on `main`, updated incrementally per commit. Done when an edit shows up in search.
-7. [ ] `index-history`: commit messages and trailers go into the index. Done when "why did we drop X" finds the `abandon` commit.
-8. [ ] `search-cmd`: `memorytree search` walks the depth levels (main → history → explore → archived → notes). Done when each level is reachable and ordered.
+6. [x] `index-files`: an FTS5 index of the files on `main`, updated incrementally per commit. Done when an edit shows up in search.
+7. [x] `index-history`: commit messages and trailers go into the index. Done when "why did we drop X" finds the `abandon` commit.
+8. [x] `search-cmd`: `memorytree search` walks the depth levels (main → history → explore → archived → notes). Done when each level is reachable and ordered.
 
 ### M3 Agents: Claude Code and Codex read memorytree on their own
 

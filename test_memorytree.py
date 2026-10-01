@@ -90,4 +90,46 @@ assert not plain_commit("pinned/style.md", NOTE, "fact(style): x\n\nKind: fact\n
 assert plain_commit("pinned/style.md", NOTE, "pin(style): simple first\n\nKind: pin\nTopic: style\n")
 assert not plain_commit("pinned/style.md", NOTE + "edited\n", "fact(style): x\n\nKind: fact\nTopic: style\n")
 
+
+# search: index files and history on main, walk the depth levels in order
+def vault_git(*args):
+    return subprocess.run(["git", "-C", str(VAULT), *args], check=True, capture_output=True, text=True).stdout
+
+
+(VAULT / "projects" / "radar").mkdir(parents=True)
+(VAULT / "projects" / "radar" / "overview.md").write_text(
+    "---\ntitle: Radar overview\nkeywords: radar, weather, previsão\n---\n\nA weather forecast tool.\n")
+mt("commit", "-k", "fact", "-t", "radar", "-m", "radar forecasts weather")
+out = mt("search", "radar")
+assert out.index("== level 1") < out.index("projects/radar/overview.md") < out.index("== level 2")
+assert "fact(radar): radar forecasts weather" in out
+assert "projects/radar/overview.md" in mt("search", "previsao")  # accents ignored
+assert "decision(search): use FTS5" in mt("search", "grep")  # found through the commit body (why)
+
+# incremental: an edit shows up, a deleted memory disappears
+(VAULT / "projects" / "radar" / "overview.md").write_text(
+    "---\ntitle: Radar overview\nkeywords: radar\n---\n\nNow also tracks volunteers.\n")
+mt("commit", "-k", "fact", "-t", "radar", "-m", "radar tracks volunteers")
+assert "projects/radar/overview.md" in mt("search", "volunteers", "-d", "1")
+(VAULT / "projects" / "radar" / "overview.md").unlink()
+mt("commit", "-k", "abandon", "-t", "radar", "-m", "radar dropped", "-b", "Replaced by a multi-client tool.")
+assert "projects/radar" not in mt("search", "volunteers", "-d", "1", ok=False)
+assert "abandon(radar): radar dropped" in mt("search", "multi", "client")
+
+# rewritten history rebuilds the index instead of drifting
+vault_git("reset", "-q", "--hard", "HEAD~1")
+assert "projects/radar/overview.md" in mt("search", "volunteers", "-d", "1")
+
+# levels 3-5 come only with --depth, and in order
+vault_git("checkout", "-q", "-b", "explore/vector-search")
+(VAULT / "topics" / "vectors.md").write_text("---\ntitle: Vectors\n---\n\nTry embeddings for recall.\n")
+mt("commit", "-k", "idea", "-t", "search", "-m", "try embeddings")
+vault_git("checkout", "-q", "main")
+vault_git("tag", "-a", "archived/graph-db", "-m", "abandon: graph database needs a server", "HEAD")
+vault_git("notes", "--ref=hindsight", "add", "-m", "embeddings looked promising but cost too much", "HEAD")
+assert "level 3" not in mt("search", "embeddings", ok=False)
+deep = mt("search", "embeddings", "graph", "server", "-d", "5")
+assert deep.index("== level 3") < deep.index("topics/vectors.md") < deep.index("== level 4") \
+    < deep.index("archived/graph-db") < deep.index("== level 5")
+
 print("ok")

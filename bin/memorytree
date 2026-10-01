@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -162,7 +163,8 @@ def cmd_commit(args):
     return 0
 
 
-LAYOUT = {"config", "COMMANDMENTS.md", "user", "pinned", "projects", "env", "topics"}
+MEMORY_DIRS = {"user", "pinned", "projects", "env", "topics"}
+LAYOUT = MEMORY_DIRS | {"config", "COMMANDMENTS.md"}
 SECRET = re.compile(
     r"sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}"
     r"|xox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----")
@@ -221,6 +223,150 @@ def install_hooks():
         (hooks / name).chmod(0o755)
 
 
+STOPWORDS = set("""
+the and for are but not you your with this that from have has was were will would could should can
+what when where which who how why its into about then than them they there their our out all any just
+also some more most very too only been being does did doing done let get got make made use using want
+need like here now yes okay que para com não nao uma uns umas dos das por pra pro mas como mais isso
+esse essa este esta aqui ele ela eles elas voce você meu minha seu sua tem ter foi ser são sao está
+estou tipo assim então entao porque quando também tmb
+""".split())
+
+
+def is_memory(path):
+    return "/" in path and path.endswith(".md") and path.split("/")[0] in MEMORY_DIRS
+
+
+def terms(text):
+    found = []
+    for word in re.findall(r"\w+", text.lower()):
+        if len(word) >= 3 and word not in STOPWORDS and not word.isdigit() and word not in found:
+            found.append(word)
+    return found[:40]
+
+
+def front_matter(text):
+    meta, body = {}, text
+    if text.startswith("---\n"):
+        head, sep, rest = text[4:].partition("\n---\n")
+        if sep:
+            body = rest
+            for line in head.splitlines():
+                k, _, v = line.partition(":")
+                meta[k.strip()] = v.strip()
+    return meta, body.strip()
+
+
+def index():
+    """FTS5 index of main's memories and commit messages, kept in .git so it never syncs.
+
+    Updated incrementally from the last indexed commit; rebuilt when history was rewritten.
+    """
+    path = Path(git("rev-parse", "--absolute-git-dir").stdout.strip()) / "memorytree" / "index.db"
+    path.parent.mkdir(exist_ok=True)
+    db = sqlite3.connect(path, timeout=10)
+    tokenize = "tokenize='unicode61 remove_diacritics 2'"
+    db.execute(f"create virtual table if not exists files using fts5(path, title, keywords, body, {tokenize})")
+    db.execute(f"create virtual table if not exists commits using fts5("
+               f"sha unindexed, date unindexed, subject, topics, body, {tokenize})")
+    db.execute("create table if not exists meta(key text primary key, value text)")
+    head = git("rev-parse", "-q", "--verify", "HEAD", check=False).stdout.strip()
+    row = db.execute("select value from meta where key = 'indexed'").fetchone()
+    indexed = row[0] if row else ""
+    if head == indexed:
+        return db
+    if indexed and git("merge-base", "--is-ancestor", indexed, head, check=False).returncode == 0:
+        changed = git("diff", "--name-only", "-z", indexed, head).stdout.split("\0")
+        log_range = f"{indexed}..{head}"
+    else:
+        db.execute("delete from files")
+        db.execute("delete from commits")
+        changed = git("ls-tree", "-r", "-z", "--name-only", head).stdout.split("\0") if head else []
+        log_range = head
+    for p in filter(None, changed):
+        db.execute("delete from files where path = ?", (p,))
+        if not is_memory(p):
+            continue
+        shown = git("show", f"{head}:{p}", check=False)
+        if shown.returncode == 0:
+            meta, body = front_matter(shown.stdout)
+            db.execute("insert into files values (?, ?, ?, ?)",
+                       (p, meta.get("title", p), meta.get("keywords", ""), body))
+    if log_range:
+        out = git("log", "--format=%H%x1f%cs%x1f%B%x1e", log_range).stdout
+        for record in filter(str.strip, out.split("\x1e")):
+            sha, date, message = record.strip().split("\x1f", 2)
+            topics = ", ".join(re.findall(r"^Topic: *(.+)$", message, re.M))
+            subject, _, body = message.partition("\n")
+            db.execute("insert into commits values (?, ?, ?, ?, ?)", (sha, date, subject, topics, body))
+    db.execute("insert or replace into meta values ('indexed', ?)", (head,))
+    db.commit()
+    return db
+
+
+def fts_query(words):
+    return " OR ".join(f'"{w}"' for w in words)
+
+
+def search_current(words, limit=10):
+    return index().execute(
+        "select path, title, -bm25(files, 5.0, 10.0, 5.0, 1.0) as score from files "
+        "where files match ? order by score desc limit ?", (fts_query(words), limit)).fetchall()
+
+
+def search_history(words, limit=10):
+    return index().execute(
+        "select sha, date, subject, -bm25(commits, 0, 0, 10.0, 5.0, 1.0) as score from commits "
+        "where commits match ? order by score desc limit ?", (fts_query(words), limit)).fetchall()
+
+
+def grep_refs(patterns, words):
+    """Levels 3-5 are small and rarely searched: plain git grep over their trees, no index."""
+    hits = []
+    refs = git("for-each-ref", "--format=%(refname)%1f%(contents:subject)", *patterns).stdout.split("\n")
+    for line in filter(None, refs):
+        ref, _, message = line.partition("\x1f")
+        matched = [w for w in words if w in message.lower()]
+        grep = git("grep", "-I", "-i", "-c", "-F", *sum((["-e", w] for w in words), []), ref, check=False)
+        for g in grep.stdout.splitlines():
+            name, _, count = g.rpartition(":")
+            hits.append((name, int(count)))
+        if matched:
+            hits.append((f"{ref} (message)", len(matched)))
+    return sorted(hits, key=lambda h: -h[1])
+
+
+LEVELS = (
+    (1, "current state"),
+    (2, "history"),
+    (3, "explorations (refs/heads/explore/*)"),
+    (4, "archive (refs/tags/archived/*, refs/tags/moment/*)"),
+    (5, "hindsight notes (refs/notes/hindsight)"),
+)
+
+
+def cmd_search(args):
+    words = terms(" ".join(args.terms))
+    if not words:
+        print("memorytree: no searchable terms", file=sys.stderr)
+        return 1
+    found = False
+    for level, name in LEVELS[:args.depth]:
+        if level == 1:
+            rows = [f"{path}  {title}  [{score:.1f}]" for path, title, score in search_current(words)]
+        elif level == 2:
+            rows = [f"{sha[:7]} {date}  {subject}  [{score:.1f}]" for sha, date, subject, score in search_history(words)]
+        else:
+            patterns = {3: ["refs/heads/explore/"], 4: ["refs/tags/archived/", "refs/tags/moment/"],
+                        5: ["refs/notes/hindsight"]}[level]
+            rows = [f"{hit}  [{count}]" for hit, count in grep_refs(patterns, words)]
+        if rows:
+            found = True
+            print(f"== level {level}: {name}")
+            print("\n".join(rows))
+    return 0 if found else 1
+
+
 def cmd_init(args):
     if args.clone and not VAULT.exists():
         git("clone", "-q", args.clone, str(VAULT), cwd=None)
@@ -264,6 +410,12 @@ def main(argv=None):
         p.add_argument(f"--{name}")
     p.add_argument("paths", nargs="*", help="what to commit (default: every change in the vault)")
     p.set_defaults(func=cmd_commit)
+
+    p = sub.add_parser("search", help="search memories, one depth level at a time")
+    p.add_argument("terms", nargs="+", help="english search terms")
+    p.add_argument("-d", "--depth", type=int, default=2, choices=range(1, 6),
+                   help="deepest level to search: 1 current, 2 history (default), 3 explorations, 4 archive, 5 notes")
+    p.set_defaults(func=cmd_search)
 
     p = sub.add_parser("hook", help="(internal) git hooks installed in the vault by init")
     p.add_argument("name", choices=("pre-commit", "commit-msg"))
