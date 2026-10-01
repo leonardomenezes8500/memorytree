@@ -147,11 +147,24 @@ def hook(event, agent, payload):
     return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
 
 
+# a brand-new vault: the first session start works before anything was indexed
+fresh = TMP / "fresh"
+subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "init"], env={**os.environ, "MEMORYTREE_DIR": str(fresh)},
+               check=True, capture_output=True)
+subprocess.run(["git", "init", "-q", "--bare", str(TMP / "fresh-remote.git")], check=True)
+subprocess.run(["git", "-C", str(fresh), "remote", "add", "origin", str(TMP / "fresh-remote.git")], check=True)
+(HOMES / "claude").mkdir(parents=True)
+(HOMES / "claude" / "settings.json").write_text('{"autoMemoryEnabled": false}')
+r = subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "agent-hook", "session-start", "claude-code"],
+                   input='{"session_id": "f1", "source": "startup"}', capture_output=True, text=True,
+                   env={**os.environ, "MEMORYTREE_DIR": str(fresh)})
+assert "memorytree is active" in r.stdout, r.stderr
+(HOMES / "claude" / "settings.json").unlink()
+
 # native-memory-gate: Claude's auto memory is on by default, so memorytree refuses to run
 out = hook("session-start", "claude-code", {"session_id": "s1", "source": "startup"})
 assert "NOT active" in out["additionalContext"] and "autoMemoryEnabled" in out["additionalContext"]
 assert hook("prompt", "claude-code", {"session_id": "s1", "prompt": "radar"}) is None
-(HOMES / "claude").mkdir(parents=True)
 (HOMES / "claude" / "settings.json").write_text('{"autoMemoryEnabled": false}')
 (HOMES / "codex").mkdir(parents=True)
 (HOMES / "codex" / "config.toml").write_text("[features]\nmemories = true\n")

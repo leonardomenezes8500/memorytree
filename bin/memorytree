@@ -13,7 +13,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 
@@ -450,7 +450,9 @@ def save_session(session_id, state):
 
 
 def detach(*command):
-    log = open(session_path("x").parent.parent / "capture.log", "a")
+    work = session_path("x").parent.parent
+    work.mkdir(parents=True, exist_ok=True)
+    log = open(work / "capture.log", "a")
     subprocess.Popen(command, cwd=VAULT, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
 
