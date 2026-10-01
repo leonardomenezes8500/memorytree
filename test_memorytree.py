@@ -287,4 +287,14 @@ assert "merged A and B" in (VAULT / "topics" / "storage.md").read_text()
 assert vault_git("rev-parse", "HEAD") == vault_git("rev-parse", "origin/main")  # pushed
 assert not vault_git("status", "--porcelain").strip()
 
+# plugin updates delete the old script: the vault's git hooks fall back to the newest installed copy
+hook_file = Path(vault_git("rev-parse", "--absolute-git-dir").strip()) / "hooks" / "pre-commit"
+hook_file.write_text(hook_file.read_text().replace(str((ROOT / "bin" / "memorytree").resolve()), "/gone/memorytree"))
+assert not plain_commit("env/g.md", NOTE, FACT)  # nothing installed: refused, never silently skipped
+installed = HOMES / "claude" / "plugins" / "cache" / "memorytree" / "memorytree" / "9.9.9" / "bin"
+installed.mkdir(parents=True)
+(installed / "memorytree").write_text((ROOT / "bin" / "memorytree").read_text())
+assert plain_commit("env/g.md", NOTE, FACT)
+assert not plain_commit("env/h.md", "no front matter\n", FACT)  # and it still enforces
+
 print("ok")
