@@ -21,6 +21,6 @@ codex plugin marketplace add leonardomenezes8500/memorytree
 codex plugin add memorytree@memorytree
 ```
 
-Then trust the hooks in `/hooks` and ask Codex to run the memorytree setup skill.
+Then trust the hooks in `/hooks` and run the setup skill (type `$` and pick it, or just ask Codex to set up memorytree).
 
-You need Python 3.11+ and git.
+Setup checks the requirements (git, Python 3.11+) and walks you through the rest, asking before every change.
