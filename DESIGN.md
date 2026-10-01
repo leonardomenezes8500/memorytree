@@ -57,9 +57,6 @@ Every edge is derived from plain git data. No separate graph database exists, an
   projects/<name>/
     overview.md                purpose, status, where it lives
     decisions.md               current decisions (the history holds the path)
-    roadmap.md                 milestones in order (section 14)
-    issues/<slug>.md           one issue per file
-    sprints/<n>.md             optional time boxes
   env/
     machines.md, accounts.md, storage.md
   topics/<name>.md             knowledge that isn't tied to one project
@@ -107,7 +104,7 @@ Session: 8a50c254
 | Trailer | Values | Purpose |
 |---|---|---|
 | `Kind` | memory: `fact`, `decision`, `preference`, `correction`, `idea`, `abandon`, `migrate`, `pin`, `unpin`; tracking: `issue`, `progress`, `close`, `milestone`, `sprint`, `release` | the type of event; filter history by it |
-| `Issue` | `<project>/<slug>` | tracking edge: the issue this commit opens, advances or closes (section 14) |
+| `Issue` | `<project>/<slug>` | tracking edge: the roadmap issue this event relates to (section 14) |
 | `Topic` | comma-separated | cross-cutting index, independent of folders |
 | `Supersedes` | commit hash | explicit time edge: this replaces that |
 | `Relates` | path or hash | explicit space edge |
@@ -237,37 +234,31 @@ memorytree stores text. Images, videos and other binaries stay where they are; a
 
 Render the 4D graph: memories are nodes; edges come from hierarchy, links and trailers, and co-change; a time slider moves through commits; tags mark moments; archived ideas appear as faded branches. Everything is derived from the repository, so no extra data has to be stored now beyond what sections 5 and 6 already require.
 
-## 14. Project tracking: milestones, issues, sprints
+## 14. Project tracking: break the stone
 
-memorytree replaces an external issue tracker. Keeping a hosted tracker up to date just so the user can see progress costs effort and tokens. A project's plan is memory like everything else: it changes, it has a history, and the path matters.
-
-| Concept | Stored as | Git mapping |
-|---|---|---|
-| **Issue** | `projects/<p>/issues/<slug>.md` | opened by an `issue` commit, advanced by `progress` commits, closed by a `close` commit; every one of them carries `Issue: <p>/<slug>`. `git log --grep "Issue: <p>/<slug>"` is the issue's full timeline |
-| **Milestone** | a section in `projects/<p>/roadmap.md`: goal, done-when, status | reached when its last issue closes; tagged `milestone/<p>/<name>` on that commit. The range between two milestone tags is everything that happened in between |
-| **Sprint** | `projects/<p>/sprints/<n>.md`: start, end, committed issues | closed by a `sprint` commit containing a short retrospective, then tagged `sprint/<p>/<n>`. Lessons from the retrospective go to level 5 |
-| **Release** | the code repo's own version tag | recorded with a `release` commit pointing to the code repo and its tag |
-
-Issue file:
+Every project is broken down **inside its own repository**, in a `ROADMAP.md` at the root. Milestones are outcomes, sprints are batches of work, and issues are the pieces, each with a "done when". This is a development standard for every project, and it replaces any hosted issue tracker. This repository's [ROADMAP.md](ROADMAP.md) is the reference.
 
 ```markdown
----
-title: Recall prefetch from the capture call
-status: open            # open | in-progress | blocked | done | dropped
-milestone: recall
-sprint: 3
-depends: index-commit-messages
----
+## Sprint 1
 
-Goal, acceptance criteria, notes.
+### M1 Core vault: `memorytree init` creates a working vault
+
+1. [x] `cli-skeleton`: … Done when `memorytree --help` lists the commands.
+2. [ ] `config`: … Done when a missing key returns its default.
 ```
 
-- **IDs are slugs, not numbers.** Several machines can open issues offline, so sequential numbers would collide; slugs are readable and unique per project folder.
-- **Dropping is not deleting.** `status: dropped` plus an `abandon` commit explaining why: the path is memory.
-- **Updates happen automatically.** The capture call (lifecycle step 3) also updates issue status when a turn did the work: it opens, advances or closes issues and writes the matching commits. Agents can also update issues explicitly.
-- **Code repos link back** with a trailer in their own commits: `Refs: memorytree:<p>/<slug>`.
-- **Seeing it:** `memorytree status [project]` prints the roadmap with milestone progress and the open issues of the current sprint; `memorytree log <project>` prints the timeline. The future visualization (section 13) shows the same data in 4D.
-- **Depth:** open issues and the current roadmap are level 1 and are injected like any other memory when relevant. Closed issues are level 2 (history), and milestone and sprint tags are level 4.
+- **The plan lives with the code.** The roadmap is versioned with the work it describes, the README links it, and anyone opening the repo sees the plan without any extra tool.
+- **Commits close issues.** The commit that finishes an issue checks its box in `ROADMAP.md` and carries `Issue: <project>/<slug>`, so `git log --grep "Issue: <project>/<slug>"` is the issue's timeline.
+- **Milestones and sprints are tags in the project repo:** `milestone/<name>` and `sprint/<n>`, placed on the commit that finished them. A sprint closes with a short retrospective in its tag message; lessons that apply beyond the project go to the vault at level 5.
+- **Dropping is not deleting.** A dropped issue is struck through with the reason, and the path stays visible.
+- **IDs are slugs.** Numbers only give order within the file.
+
+memorytree's role:
+
+- The commandments tell agents to read `ROADMAP.md` before working in a repo, take the next unchecked issue unless told otherwise, and check it off in the commit that finishes it.
+- The capture call records progress in the vault (`progress` and `close` events with `Issue:` trailers) along with the context and decisions behind the work, which the roadmap file does not hold.
+- `memorytree status [project]` reads `ROADMAP.md` across the user's known projects and shows milestone progress and the current sprint.
+- The vault keeps the memory *about* a project (`projects/<name>/`: overview, decisions, where it lives). The repo keeps its *plan*. Neither duplicates the other.
 
 ## 15. Decisions
 
@@ -281,7 +272,7 @@ Goal, acceptance criteria, notes.
 - **Q4 Media:** out of scope. memorytree stores text only (section 12).
 - **Q5 Capture:** runs after every turn, in the background, with no latency for the user.
 - **Q6 Agents:** Claude Code and Codex first. Other major agents (Cursor, Gemini CLI, …) are a roadmap issue.
-- **Q7 Tracking:** memorytree holds milestones, issues and sprints (section 14). No hosted issue tracker is used, including for memorytree itself.
+- **Q7 Tracking:** each project's plan lives in its own repository's `ROADMAP.md` (section 14). No hosted issue tracker is used, including for memorytree itself.
 
 ## 16. First memories
 
@@ -289,4 +280,4 @@ The first memories the user wants pinned once memorytree runs:
 
 1. **Simple first, depth on demand** (2026-09-30). Any doc, README or answer opens with the shortest form that says what it is and why, in a few direct lines, and links to the deeper material (e.g. `DESIGN.md`) instead of inlining it. The reference example is this repository's README.
 
-2. **Break the stone** (2026-10-01). Every project is built by breaking it into smaller pieces: milestones (outcomes) → sprints (batches) → issues (pieces), each with a clear "done when", worked in order. Tracking lives in memorytree, not in a hosted tracker.
+2. **Break the stone** (2026-10-01). A development standard for every project: break it down inside its own repository, in a `ROADMAP.md` with milestones (outcomes) → sprints (batches) → issues (pieces), each with a "done when", worked in order. The commit that finishes an issue checks it off. There is no hosted tracker.

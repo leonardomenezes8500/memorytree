@@ -1,62 +1,60 @@
 # Roadmap
 
-The stone, broken into pieces. Milestones are outcomes, sprints are batches of work, and issues are the pieces. Do them in order; each issue is done when its "done when" holds.
-
-This file is temporary: issue `import-roadmap` moves it into the vault as `projects/memorytree/roadmap.md` plus one file per issue.
+The stone, broken into pieces. Milestones are outcomes, sprints are batches of work, and issues are the pieces. Do them in order; each issue is done when its "done when" holds. The commit that finishes an issue checks its box. See DESIGN.md §14.
 
 ## Sprint 1
 
 ### M1 Core vault: `memorytree init` creates a working vault
 
-1. `cli-skeleton`: a single-file Python CLI using only the standard library. Done when `memorytree --help` lists the commands.
-2. `config`: defaults, read through `git config -f`, with `.git/config` overrides. Done when a missing key returns its default.
-3. `init-vault`: create or clone the vault, create the layout, generate the config and `COMMANDMENTS.md`. Done when `init` on an empty home gives a committed vault.
-4. `commit-format`: `memorytree commit` writes the subject, body and trailers. Done when a malformed message is refused.
-5. `vault-git-hooks`: a pre-commit hook (layout, front matter, secret scan, pinned protection) and a commit-msg hook (format, trailers). Done when bad commits are refused even from plain `git commit`.
+1. [ ] `cli-skeleton`: a single-file Python CLI using only the standard library. Done when `memorytree --help` lists the commands.
+2. [ ] `config`: defaults, read through `git config -f`, with `.git/config` overrides. Done when a missing key returns its default.
+3. [ ] `init-vault`: create or clone the vault, create the layout, generate the config and `COMMANDMENTS.md`. Done when `init` on an empty home gives a committed vault.
+4. [ ] `commit-format`: `memorytree commit` writes the subject, body and trailers. Done when a malformed message is refused.
+5. [ ] `vault-git-hooks`: a pre-commit hook (layout, front matter, secret scan, pinned protection) and a commit-msg hook (format, trailers). Done when bad commits are refused even from plain `git commit`.
 
 ## Sprint 2
 
 ### M2 Search: find the right memory in ~50 ms
 
-6. `index-files`: an FTS5 index of the files on `main`, updated incrementally per commit. Done when an edit shows up in search.
-7. `index-history`: commit messages and trailers go into the index. Done when "why did we drop X" finds the `abandon` commit.
-8. `search-cmd`: `memorytree search` walks the depth levels (main → history → explore → archived → notes). Done when each level is reachable and ordered.
+6. [ ] `index-files`: an FTS5 index of the files on `main`, updated incrementally per commit. Done when an edit shows up in search.
+7. [ ] `index-history`: commit messages and trailers go into the index. Done when "why did we drop X" finds the `abandon` commit.
+8. [ ] `search-cmd`: `memorytree search` walks the depth levels (main → history → explore → archived → notes). Done when each level is reachable and ordered.
 
 ### M3 Agents: Claude Code and Codex read memorytree on their own
 
-9. `plugin-manifests`: Claude Code and Codex plugins from one repo, plus a marketplace. Done when both install from GitHub.
-10. `hook-session-start`: pull, then inject the profile, pinned memories and the commandments pointer. Done when a fresh session knows the user.
-11. `hook-recall`: inject relevant memories on each prompt, at most once per session. Done when naming a project recalls it.
-12. `native-memory-gate`: refuse to run while native memory is on, offer to turn it off, and block writes to native memory paths. Done on both agents.
-13. `commandments-install`: point `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` at the commandments. Done when both agents follow the search order.
+9. [ ] `plugin-manifests`: Claude Code and Codex plugins from one repo, plus a marketplace. Done when both install from GitHub.
+10. [ ] `hook-session-start`: pull, then inject the profile, pinned memories and the commandments pointer. Done when a fresh session knows the user.
+11. [ ] `hook-recall`: inject relevant memories on each prompt, at most once per session. Done when naming a project recalls it.
+12. [ ] `native-memory-gate`: refuse to run while native memory is on, offer to turn it off, and block writes to native memory paths. Done on both agents.
+13. [ ] `commandments-install`: point `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` at the commandments. Done when both agents follow the search order.
 
 ## Sprint 3
 
 ### M4 Capture: every turn is remembered without asking
 
-14. `capture-hook`: a detached capture after each turn, using the cheap model from config. Done when closing the session right away still captures.
-15. `capture-apply`: validate the model output, write the files, commit and push. Done when bad output is rejected and good output is committed in the right format.
-16. `prefetch`: `next_terms` from the capture call feeds the next prompt's recall. Done when a Portuguese prompt recalls an English memory on the second turn.
-17. `conflict-resolution`: two machines capture at once, and the model resolves the conflict as a `correction`. Done when a forced conflict merges cleanly.
+14. [ ] `capture-hook`: a detached capture after each turn, using the cheap model from config. Done when closing the session right away still captures.
+15. [ ] `capture-apply`: validate the model output, write the files, commit and push. Done when bad output is rejected and good output is committed in the right format.
+16. [ ] `prefetch`: `next_terms` from the capture call feeds the next prompt's recall. Done when a Portuguese prompt recalls an English memory on the second turn.
+17. [ ] `conflict-resolution`: two machines capture at once, and the model resolves the conflict as a `correction`. Done when a forced conflict merges cleanly.
 
 ### M5 Go live: memorytree replaces native memory on every machine
 
-18. `setup-skill`: the plugin's setup skill wraps `init`, the gate, migration and pins. Done when a new machine is fully set up from one command.
-19. `migrate-native`: import native Claude Code and Codex memories. Done when the old memories are found by search.
-20. `import-roadmap`: this file goes into the vault as `roadmap.md` plus issue files, and the first memories (DESIGN.md §16) get pinned. Done when `ROADMAP.md` is deleted from the repo.
+18. [ ] `setup-skill`: the plugin's setup skill wraps `init`, the gate, migration and pins. Done when a new machine is fully set up from one command.
+19. [ ] `migrate-native`: import native Claude Code and Codex memories. Done when the old memories are found by search.
+20. [ ] `pin-first-memories`: pin the first memories from DESIGN.md §16. Done when a fresh session on any machine loads them.
 
 ## Sprint 4
 
 ### M6 Tracking: the vault is the project tracker
 
-21. `issue-lifecycle`: open, progress, close and drop issues, and capture updates their status automatically. Done when finishing work closes its issue with no prompt from the user.
-22. `status-cmd`: `memorytree status [project]` shows milestone progress and the current sprint. Done when it matches the files.
-23. `milestone-sprint-tags`: tag milestones and sprints, and close a sprint with a retrospective. Done when `git tag` shows the timeline.
+21. [ ] `issue-lifecycle`: agents take the next unchecked issue, check it off in the commit that finishes it, and capture records the progress in the vault. Done when finishing work closes its issue with no prompt from the user.
+22. [ ] `status-cmd`: `memorytree status [project]` reads `ROADMAP.md` across known projects and shows milestone progress and the current sprint. Done when it matches the files.
+23. [ ] `milestone-sprint-tags`: tag milestones and sprints in the project repo, and close a sprint with a retrospective. Done when `git tag` shows the timeline.
 
 ### M7 Depth: ideas have a lifecycle
 
-24. `explore-archive`: `explore/<idea>` branches, plus promoting an idea to `main` or archiving it as `archived/<idea>`. Done when an abandoned idea is searchable but never auto-loaded.
-25. `hindsight-notes`: later judgments recorded as git notes, with patterns that keep holding promoted to level 0. Done when a note shows up in level-5 search.
+24. [ ] `explore-archive`: `explore/<idea>` branches, plus promoting an idea to `main` or archiving it as `archived/<idea>`. Done when an abandoned idea is searchable but never auto-loaded.
+25. [ ] `hindsight-notes`: later judgments recorded as git notes, with patterns that keep holding promoted to level 0. Done when a note shows up in level-5 search.
 
 ## Later
 
