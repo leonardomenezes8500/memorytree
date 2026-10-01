@@ -201,7 +201,7 @@ assert claude_md.startswith("# my rules") and "<!-- memorytree -->" in claude_md
 assert len(claude_md) < 1600  # the block loads every session: keep it small
 assert "Hook check" in claude_md and "/hooks" in claude_md  # tells the user when hooks are not running
 assert "# Pinned rules\n- Keep it simple." in claude_md  # subagents read this file too; economy loads the rule
-assert "core.mode" in claude_md  # the token rule is itself a commandment
+assert "core.mode" in claude_md and "AGENTS.md" in claude_md  # token rule covers instruction files too
 subprocess.run(["git", "-C", str(VAULT), "config", "memorytree.core.mode", "full"], check=True)
 mt("install", "claude-code")
 assert "# Pinned rules\n- Body." in (HOMES / "claude" / "CLAUDE.md").read_text()  # full mode loads the whole pin

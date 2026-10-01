@@ -40,7 +40,7 @@ Every edge is derived from plain git data. No separate graph database exists, an
 1. **Git is the engine.** memorytree adds memory semantics on top of git and never reimplements what git already does: storage, hashing, history, search, sync, merge, config, hooks.
 2. **Minimal dependencies.** Git is required. Python 3 (standard library only) runs the hooks and the search index (Q1).
 3. **No escape.** While memorytree is active, an agent cannot skip reading it or save memory anywhere else (section 9).
-4. **Recall only what matters, compiled for tokens.** Inject the relevant slice, never the whole store, and keep everything compact: `core.mode = economy` (the default) has memories written as dense facts and loads each pinned memory as its one-line `rule:`; `full` trades tokens for prose.
+4. **Recall only what matters, compiled for tokens.** Inject the relevant slice, never the whole store, and keep everything compact, including the agents' instruction files (CLAUDE.md, AGENTS.md): `core.mode = economy` (the default) has memories written as dense facts and loads each pinned memory as its one-line `rule:`; `full` trades tokens for prose.
 5. **English, always.** Code, docs, memories, keywords and commit messages are in English. The only exception is text that must be kept verbatim in its original language (a quote, a hardcoded UI string); it is stored as-is and marked as verbatim.
 6. **The user owns the data.** The vault is a private repository the user controls. memorytree ships no server and no telemetry.
 
