@@ -13,7 +13,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -397,6 +397,12 @@ def commandments_block():
     read too; hook injections only reach the main session."""
     text = (VAULT / "COMMANDMENTS.md").read_text() if (VAULT / "COMMANDMENTS.md").is_file() else COMMANDMENTS
     text = text.replace("`memorytree search", f"`python3 {Path(__file__).resolve()} search").strip()
+    # This block loads even when the hooks don't run, so it is what can tell the user they aren't running.
+    text += ("\n\n**Hook check.** If this session's context has no \"memorytree is active\" line from the memorytree "
+             "hooks, they are not running: say so to the user in your first reply, before anything else. Codex: "
+             "open `/hooks` and trust the three memorytree hooks (SessionStart, UserPromptSubmit, Stop), then start "
+             "a new session. Claude Code: enable the memorytree plugin (`/plugin`), then start a new session. "
+             "If the context says memorytree is NOT active, relay the reason it gives.")
     pins = [f"## {meta.get('title', rel)} ({rel})\n\n{body}" for rel, meta, body in pinned_memories()]
     if pins:
         text += "\n\n# Pinned memories\n\nEndorsed by the user; they change only on the user's explicit request.\n\n"
