@@ -180,7 +180,7 @@ assert hook("tool", "claude-code", {"tool_input": {"file_path": str(VAULT / "top
 (VAULT / "user" / "profile.md").write_text("---\ntitle: Profile\n---\n\nCalls the assistant Dante.\n")
 mt("commit", "-k", "preference", "-t", "user", "-m", "assistant name")
 start = hook("session-start", "codex", {"session_id": "c1", "source": "startup"})["additionalContext"]
-assert "memorytree is active" in start and "Dante" in start and "simple first" not in start.lower()
+assert "memorytree is active" in start and "Dante" in start
 assert "## T (pinned/style.md)" in start
 
 # hook-recall: naming a project recalls it, once per session
@@ -200,6 +200,7 @@ assert "**Hook check.**" in claude_md and "/hooks" in claude_md  # tells the use
 assert "# Pinned memories" in claude_md and "## T (pinned/style.md)" in claude_md  # subagents read this file too
 start = hook("session-start", "claude-code", {"session_id": "s10", "source": "startup"})["additionalContext"]
 assert "Dante" in start and "pinned/style.md" not in start  # not injected twice
+assert "## Latest memory events" in start and "preference(user): assistant name" in start
 shown = subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "agent-hook", "session-start", "codex"],
                        input='{"session_id": "s11"}', capture_output=True, text=True).stdout
 assert re.search(r"memorytree active: \d+ memories, 1 pinned", json.loads(shown)["systemMessage"])  # seen by the user

@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.8"
+VERSION = "0.1.9"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -508,6 +508,9 @@ def on_session_start(event, agent):
     if (VAULT / "user/profile.md").is_file():
         meta, body = front_matter((VAULT / "user/profile.md").read_text())
         parts.append(f"## {meta.get('title', 'User profile')} (user/profile.md)\n{body}")
+    recent = git("log", "-10", "--format=%cs %s", check=False).stdout.strip()
+    if recent:  # answers "where did we stop?" with no tool call; that question has no searchable terms
+        parts.append(f"## Latest memory events (newest first)\n{recent}")
     if not installed:  # otherwise the pinned memories already arrive through the global instructions
         parts += [f"## {meta.get('title', rel)} ({rel})\n{body}" for rel, meta, body in pinned_memories()]
     memories = sum(1 for p in VAULT.rglob("*.md") if is_memory(str(p.relative_to(VAULT))))
