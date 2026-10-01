@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.16"
+VERSION = "0.1.17"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -246,6 +246,7 @@ also some more most very too only been being does did doing done let get got mak
 need like here now yes okay que para com não nao uma uns umas dos das por pra pro mas como mais isso
 esse essa este esta aqui ele ela eles elas voce você meu minha seu sua tem ter foi ser são sao está
 estou tipo assim então entao porque quando também tmb sim blz beleza valeu obrigado obrigada thanks thank pode
+hey hello sure cool great nice please thx alright perfect awesome
 """.split())
 
 

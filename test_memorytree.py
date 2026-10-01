@@ -331,6 +331,8 @@ fake({"memories": [{"path": "topics/greeting.md", "title": "G", "body": "should 
       "commit": {"kind": "fact", "topics": ["x"], "summary": "x"}})
 capture_turn("s12", "oi", "Oi! Em que posso ajudar?")
 capture_turn("s12", "valeu, blz", "De nada.")
+capture_turn("s12", "great, thanks!", "You're welcome.")
+capture_turn("s12", "hey", "Hi! How can I help?")
 assert vault_git("rev-parse", "HEAD") == head and not (VAULT / "topics" / "greeting.md").exists()
 
 print("ok")
