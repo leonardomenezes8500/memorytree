@@ -297,4 +297,9 @@ installed.mkdir(parents=True)
 assert plain_commit("env/g.md", NOTE, FACT)
 assert not plain_commit("env/h.md", "no front matter\n", FACT)  # and it still enforces
 
+# recall skips only what session start already loaded (profile, pinned), not every user/ memory
+(VAULT / "user" / "ui-checks.md").write_text("---\ntitle: UI checks\nkeywords: viewport, firefox\n---\n\nCheck 320 px.\n")
+mt("commit", "-k", "preference", "-t", "user", "-m", "ui checks")
+assert "user/ui-checks.md" in hook("prompt", "claude-code", {"session_id": "s9", "prompt": "viewport firefox"})["additionalContext"]
+
 print("ok")
