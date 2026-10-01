@@ -195,6 +195,9 @@ assert hook("prompt", "claude-code", {"session_id": "s2", "prompt": "radar"}) is
 mt("install")
 claude_md = (HOMES / "claude" / "CLAUDE.md").read_text()
 assert claude_md.startswith("# my rules") and "<!-- memorytree -->" in claude_md and "search <english" in claude_md
+assert "# Pinned memories" in claude_md and "## T (pinned/style.md)" in claude_md  # subagents read this file too
+start = hook("session-start", "claude-code", {"session_id": "s10", "source": "startup"})["additionalContext"]
+assert "Dante" in start and "pinned/style.md" not in start  # not injected twice
 assert (HOMES / "codex" / "AGENTS.md").read_text().count("<!-- memorytree -->") == 1
 assert "unchanged" in mt("install", "codex")
 mt("install", "--uninstall")

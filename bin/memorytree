@@ -13,7 +13,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -388,10 +388,20 @@ GLOBAL_INSTRUCTIONS = {"claude-code": CLAUDE_HOME / "CLAUDE.md", "codex": CODEX_
 BLOCK = re.compile(r"<!-- memorytree -->\n.*?<!-- /memorytree -->\n?", re.S)
 
 
+def pinned_memories():
+    return [(str(p.relative_to(VAULT)), *front_matter(p.read_text())) for p in sorted((VAULT / "pinned").glob("*.md"))]
+
+
 def commandments_block():
+    """Commandments plus pinned memories. They go into the agents' global instructions, which subagents
+    read too; hook injections only reach the main session."""
     text = (VAULT / "COMMANDMENTS.md").read_text() if (VAULT / "COMMANDMENTS.md").is_file() else COMMANDMENTS
-    text = text.replace("`memorytree search", f"`python3 {Path(__file__).resolve()} search")
-    return f"<!-- memorytree -->\n{text.strip()}\n<!-- /memorytree -->\n"
+    text = text.replace("`memorytree search", f"`python3 {Path(__file__).resolve()} search").strip()
+    pins = [f"## {meta.get('title', rel)} ({rel})\n\n{body}" for rel, meta, body in pinned_memories()]
+    if pins:
+        text += "\n\n# Pinned memories\n\nEndorsed by the user; they change only on the user's explicit request.\n\n"
+        text += "\n\n".join(pins)
+    return f"<!-- memorytree -->\n{text}\n<!-- /memorytree -->\n"
 
 
 def install_commandments(agent, remove=False):
@@ -478,14 +488,16 @@ def on_session_start(event, agent):
         detach("git", "pull", "-q", "--rebase", "--autostash")
     # Plugin updates move this script, so re-point the vault's git hooks and the commandments block at it.
     install_hooks()
-    if BLOCK.search(GLOBAL_INSTRUCTIONS[agent].read_text() if GLOBAL_INSTRUCTIONS[agent].is_file() else ""):
+    installed = bool(BLOCK.search(GLOBAL_INSTRUCTIONS[agent].read_text() if GLOBAL_INSTRUCTIONS[agent].is_file() else ""))
+    if installed:
         install_commandments(agent)
     parts = [f"memorytree is active (vault: {VAULT}). Memories relevant to each prompt are injected "
              f"automatically; search deeper with `python3 {Path(__file__).resolve()} search <english terms> [-d 1-5]`."]
-    for rel in ["user/profile.md", *sorted(str(p.relative_to(VAULT)) for p in (VAULT / "pinned").glob("*.md"))]:
-        if (VAULT / rel).is_file():
-            meta, body = front_matter((VAULT / rel).read_text())
-            parts.append(f"## {meta.get('title', rel)} ({rel})\n{body}")
+    if (VAULT / "user/profile.md").is_file():
+        meta, body = front_matter((VAULT / "user/profile.md").read_text())
+        parts.append(f"## {meta.get('title', 'User profile')} (user/profile.md)\n{body}")
+    if not installed:  # otherwise the pinned memories already arrive through the global instructions
+        parts += [f"## {meta.get('title', rel)} ({rel})\n{body}" for rel, meta, body in pinned_memories()]
     return context("SessionStart", "\n\n".join(parts))
 
 
