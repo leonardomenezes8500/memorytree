@@ -162,12 +162,72 @@ def cmd_commit(args):
     return 0
 
 
+LAYOUT = {"config", "COMMANDMENTS.md", "user", "pinned", "projects", "env", "topics"}
+SECRET = re.compile(
+    r"sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----")
+HOOK = """#!/bin/sh
+MEMORYTREE_DIR="$(git rev-parse --show-toplevel)" exec python3 '{script}' hook {name} "$@"
+"""
+
+
+def staged(diff_filter="ACMRD"):
+    out = git("diff", "--cached", "--name-only", "-z", f"--diff-filter={diff_filter}").stdout
+    return [p for p in out.split("\0") if p]
+
+
+def check_staged():
+    errors = []
+    for path in staged("ACMR"):
+        top = path.split("/")[0]
+        if top not in LAYOUT:
+            errors.append(f"{path}: outside the vault layout ({', '.join(sorted(LAYOUT))})")
+            continue
+        if "/" in path and not path.endswith(".md"):
+            errors.append(f"{path}: memories are markdown files")
+            continue
+        text = git("show", f":{path}").stdout
+        if SECRET.search(text):
+            errors.append(f"{path}: contains what looks like a secret value; record where it lives instead")
+        if "/" in path and not re.match(r"---\n(.*\n)*?title: *\S.*\n(.*\n)*?---\n", text):
+            errors.append(f"{path}: needs front matter with a title")
+    return errors
+
+
+def check_message(message):
+    errors = validate_message(message)
+    subject = message.lstrip().split("\n", 1)[0]
+    if not errors and not subject.startswith(GIT_GENERATED):
+        kind = SUBJECT.fullmatch(subject).group(1)
+        if kind not in ("pin", "unpin") and any(p.startswith("pinned/") for p in staged()):
+            errors.append("pinned memories change only through a pin or unpin commit, on the user's explicit request")
+    return errors
+
+
+def cmd_hook(args):
+    errors = check_staged() if args.name == "pre-commit" else check_message(Path(args.file).read_text())
+    if errors:
+        print("memorytree: commit refused\n  " + "\n  ".join(errors), file=sys.stderr)
+        return 1
+    return 0
+
+
+def install_hooks():
+    hooks = Path(git("rev-parse", "--git-path", "hooks").stdout.strip())
+    hooks = hooks if hooks.is_absolute() else VAULT / hooks
+    hooks.mkdir(parents=True, exist_ok=True)
+    for name in ("pre-commit", "commit-msg"):
+        (hooks / name).write_text(HOOK.format(script=Path(__file__).resolve(), name=name))
+        (hooks / name).chmod(0o755)
+
+
 def cmd_init(args):
     if args.clone and not VAULT.exists():
         git("clone", "-q", args.clone, str(VAULT), cwd=None)
     elif not (VAULT / ".git").is_dir():
         VAULT.mkdir(parents=True, exist_ok=True)
         git("init", "-q", "-b", "main")
+    install_hooks()
     created = []
     for path, text in ((CONFIG, DEFAULT_CONFIG), (VAULT / "COMMANDMENTS.md", COMMANDMENTS)):
         if not path.exists():
@@ -204,6 +264,11 @@ def main(argv=None):
         p.add_argument(f"--{name}")
     p.add_argument("paths", nargs="*", help="what to commit (default: every change in the vault)")
     p.set_defaults(func=cmd_commit)
+
+    p = sub.add_parser("hook", help="(internal) git hooks installed in the vault by init")
+    p.add_argument("name", choices=("pre-commit", "commit-msg"))
+    p.add_argument("file", nargs="?", help="commit message file (commit-msg)")
+    p.set_defaults(func=cmd_hook)
 
     args = parser.parse_args(argv)
     return args.func(args)

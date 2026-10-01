@@ -65,4 +65,29 @@ assert m.validate_message("fact(env): x\n\nKind: fact\nTopic: other\n")  # subje
 assert m.validate_message("blah(env): x\n\nKind: blah\nTopic: env\n")  # unknown kind
 assert m.validate_message("fact(env): x\nno blank line\n\nKind: fact\nTopic: env\n")
 
+# vault-git-hooks: bad commits are refused even from plain git commit
+def plain_commit(path, text, message):
+    target = VAULT / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    subprocess.run(["git", "-C", str(VAULT), "add", "-A"], check=True)
+    r = subprocess.run(["git", "-C", str(VAULT), "commit", "-q", "-m", message], capture_output=True, text=True)
+    if r.returncode:
+        subprocess.run(["git", "-C", str(VAULT), "reset", "-q", "--hard"], check=True)
+        subprocess.run(["git", "-C", str(VAULT), "clean", "-qfd"], check=True)
+    return r.returncode == 0
+
+
+NOTE = "---\ntitle: T\n---\n\nBody.\n"
+FACT = "fact(env): x\n\nKind: fact\nTopic: env\n"
+assert plain_commit("env/a.md", NOTE, FACT)
+assert not plain_commit("env/b.md", NOTE, "updated stuff")  # message format
+assert not plain_commit("misc/c.md", NOTE, FACT)  # outside the layout
+assert not plain_commit("env/d.md", "no front matter\n", FACT)
+assert not plain_commit("env/e.txt", "text\n", FACT)  # not markdown
+assert not plain_commit("env/f.md", NOTE + "token ghp_" + "a" * 36 + "\n", FACT)  # secret
+assert not plain_commit("pinned/style.md", NOTE, "fact(style): x\n\nKind: fact\nTopic: style\n")
+assert plain_commit("pinned/style.md", NOTE, "pin(style): simple first\n\nKind: pin\nTopic: style\n")
+assert not plain_commit("pinned/style.md", NOTE + "edited\n", "fact(style): x\n\nKind: fact\nTopic: style\n")
+
 print("ok")
