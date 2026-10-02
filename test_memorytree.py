@@ -32,6 +32,8 @@ def git_log():
 # cli-skeleton
 assert "config" in mt("--help")
 assert mt("--version").startswith("memorytree ")
+manifests = [json.loads((ROOT / d / "plugin.json").read_text())["version"] for d in (".claude-plugin", ".codex-plugin")]
+assert mt("--version") == f"memorytree {manifests[0]}" and len(set(manifests)) == 1, (mt("--version"), manifests)
 
 # config: defaults with no vault, canonical keys, subsections keep their case
 assert mt("config", "recall.maxMemories") == "3"
