@@ -56,6 +56,10 @@ The stone, broken into pieces. Milestones are outcomes, sprints are batches of w
 24. [ ] `explore-archive`: `explore/<idea>` branches, plus promoting an idea to `main` or archiving it as `archived/<idea>`. Done when an abandoned idea is searchable but never auto-loaded.
 25. [ ] `hindsight-notes`: later judgments recorded as git notes, with patterns that keep holding promoted to level 0. Done when a note shows up in level-5 search.
 
+### M8 Trust: capture never loses a fact silently
+
+26. [ ] `capture-no-silent-delete`: capture may delete or overwrite a memory only for a decision or correction the user stated, never for a proposal still under discussion (on 2026-10-01 a proposal was taken as a decision and memories were deleted). Done when a proposal turn leaves every existing memory intact and a stated decision still updates it.
+
 ## Later
 
 - Other agents (Cursor, Gemini CLI, …).
