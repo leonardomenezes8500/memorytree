@@ -294,7 +294,7 @@ def index():
     if head == indexed:
         return db
     if indexed and git("merge-base", "--is-ancestor", indexed, head, check=False).returncode == 0:
-        changed = git("diff", "--name-only", "-z", indexed, head).stdout.split("\0")
+        changed = git("diff", "--no-renames", "--name-only", "-z", indexed, head).stdout.split("\0")
         log_range = f"{indexed}..{head}"
     else:
         db.execute("delete from files")

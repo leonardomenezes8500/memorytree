@@ -124,6 +124,16 @@ assert "abandon(radar): radar dropped" in mt("search", "multi", "client")
 vault_git("reset", "-q", "--hard", "HEAD~1")
 assert "projects/radar/overview.md" in mt("search", "volunteers", "-d", "1")
 
+# a renamed memory leaves no stale path behind (git diff detects renames and lists only the new name)
+(VAULT / "projects" / "beacon").mkdir()
+(VAULT / "projects" / "beacon" / "notes.md").write_text("---\ntitle: Beacon notes\n---\n\nLighthouse keepers.\n")
+mt("commit", "-k", "fact", "-t", "beacon", "-m", "beacon notes")
+assert "projects/beacon/notes.md" in mt("search", "keepers", "-d", "1")
+vault_git("mv", "projects/beacon", "projects/lamp")
+mt("commit", "-k", "decision", "-t", "beacon", "-m", "rename beacon to lamp")
+out = mt("search", "keepers", "-d", "1")
+assert "projects/lamp/notes.md" in out and "projects/beacon" not in out, out
+
 # levels 3-5 come only with --depth, and in order
 vault_git("checkout", "-q", "-b", "explore/vector-search")
 (VAULT / "topics" / "vectors.md").write_text("---\ntitle: Vectors\n---\n\nTry embeddings for recall.\n")
