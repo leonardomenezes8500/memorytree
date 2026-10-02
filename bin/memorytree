@@ -207,6 +207,9 @@ def check_staged():
         if path.startswith("pinned/") and config()["core.mode"] == "economy" and \
                 not re.match(r"---\n(.*\n)*?rule: *\S.*\n(.*\n)*?---\n", text):
             errors.append(f"{path}: economy mode needs a one-line 'rule:' in the front matter of every pinned memory")
+        if path.startswith("pinned/") and re.match(r"---\n(.*\n)*?level: *2\n(.*\n)*?---\n", text) and \
+                not re.match(r"---\n(.*\n)*?keys: *\S.*\n(.*\n)*?---\n", text):
+            errors.append(f"{path}: a level-2 pin loads only its keys, so it needs 'keys:' in the front matter")
         if "/" in path and not re.match(r"---\n(.*\n)*?title: *\S.*\n(.*\n)*?---\n", text):
             errors.append(f"{path}: needs front matter with a title")
     return errors
@@ -406,11 +409,20 @@ def commandments_block():
     text += ("\nHook check: if your context lacks \"memorytree is active\", tell the user first that its hooks aren't "
              "running (Codex: trust them in /hooks; Claude Code: enable the plugin), then to start a new session.")
     # Each pin's one-line `rule` is what loads every session; its full text stays in the vault, a search away.
+    # A level-2 pin loads only its keys, like a skill's description: the agent opens the file when the task
+    # touches one. The model decides, not a keyword hook, so a missed trigger can't silently drop the rule.
     full = config()["core.mode"] == "full"
-    pins = [f"- {' '.join(body.split()) if full else meta.get('rule') or ' '.join(body.split())}"
-            for rel, meta, body in pinned_memories()]
+    pins, keyed = [], []
+    for rel, meta, body in pinned_memories():
+        if not full and meta.get("level") == "2" and meta.get("keys"):
+            keyed.append(f"- [{'|'.join(k.strip() for k in meta['keys'].split(','))}] → {VAULT / rel}")
+        else:
+            pins.append(f"- {' '.join(body.split()) if full else meta.get('rule') or ' '.join(body.split())}")
     if pins:
         text += "\n\n# Pinned rules\n" + "\n".join(pins)
+    if keyed:
+        text += ("\n\n# Pinned keys\nWhen a task touches a key, read its file before acting and follow it as a "
+                 "pinned rule.\n" + "\n".join(keyed))
     return f"<!-- memorytree -->\n{text}\n<!-- /memorytree -->\n"
 
 

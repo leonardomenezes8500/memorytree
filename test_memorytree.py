@@ -235,6 +235,17 @@ shown = subprocess.run(["python3", str(ROOT / "bin" / "memorytree"), "agent-hook
 assert re.search(r"memorytree active: \d+ memories, 1 pinned", json.loads(shown)["systemMessage"])  # seen by the user
 assert (HOMES / "codex" / "AGENTS.md").read_text().count("<!-- memorytree -->") == 1
 assert "unchanged" in mt("install", "codex")
+
+# a level-2 pin loads only its keys and the path to read; without keys it is refused
+KEYED = "---\ntitle: Shell\nrule: POSIX sh only.\nlevel: 2\nkeys: shell, sh, script\n---\n\nUse dash -n.\n"
+assert not plain_commit("pinned/shell.md", KEYED.replace("keys: shell, sh, script\n", ""),
+                        "pin(shell): posix\n\nKind: pin\nTopic: shell\n")
+assert plain_commit("pinned/shell.md", KEYED, "pin(shell): posix\n\nKind: pin\nTopic: shell\n")
+mt("install", "codex")
+agents_md = (HOMES / "codex" / "AGENTS.md").read_text()
+assert f"# Pinned keys\nWhen a task touches a key, read its file" in agents_md
+assert f"- [shell|sh|script] → {VAULT}/pinned/shell.md" in agents_md and "POSIX sh only." not in agents_md
+assert "- Keep it simple." in agents_md  # level-1 pins still load their rule
 mt("install", "--uninstall")
 assert (HOMES / "claude" / "CLAUDE.md").read_text().strip() == "# my rules\n\nBe brief."
 

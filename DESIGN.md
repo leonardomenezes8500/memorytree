@@ -151,6 +151,7 @@ Lifecycle of an idea: it starts on `explore/<idea>`. If accepted, it is merged i
 Most memories are inferred: the capture model decides what was worth keeping. A **pinned** memory is different, because the user endorsed it explicitly ("I want this as a standard", "pin this"). It is the strongest signal there is.
 
 - Lives in `pinned/<slug>.md` and is loaded in every session (level 0). There are few of them and they are short. Each pinned memory carries a one-line `rule:` in its front matter: that line travels inside the commandments block in each agent's global instructions (subagents read those files but never see hook injections), while the full text stays in the vault for search. Everything loaded every session is kept to a few hundred tokens.
+- **Level 2: keys only.** A pin with `level: 2` and `keys:` (comma-separated) loads as one line, `[key|key] → <path>`, under a "Pinned keys" header that tells the agent to read the file before acting when a task touches a key. It is how a skill works: the description always loads, the body when used. Rules tied to an activity (shell scripts, `--help`, roadmaps) go to level 2; rules that apply to every turn or commit (versioning, keeping projects separate, short answers) stay at level 1, because no key would reliably call them. `core.mode = full` loads every pin in full. See Q8.
 - Protected: the capture model may never edit or delete one. Only an explicit user request changes it, through a `pin` or `unpin` commit. The pre-commit hook rejects any other commit that touches `pinned/`.
 - When the user praises something without asking to pin it, the capture model records it as a `preference` and suggests pinning it. It never pins on its own.
 - `git log --grep "Kind: pin"` is the history of everything the user has endorsed.
@@ -274,6 +275,9 @@ memorytree's role:
 - **Q4 Media:** out of scope. memorytree stores text only (section 12).
 - **Q5 Capture:** runs after every turn, in the background, with no latency for the user.
 - **Q6 Agents:** Claude Code and Codex first. Other major agents (Cursor, Gemini CLI, …) are a roadmap issue.
+- **Q8 Conditional pins: the model opens them, not a hook.** Decided 2026-10-02. Level-2 pins (section 7b) load only their keys; the agent reads the file when the task touches one. Lets pins grow past ~20 without paying for each one every session.
+  - Ruled out (2026-10-01): a hook that injects a pin when the prompt matches a keyword or a `files:` glob. A missed trigger drops the rule silently, and prompts rarely name the activity ("write a backup script" never says "shell").
+  - Risk: the agent sees a key and skips the read. Checked with a headless session before moving real pins; revisit if a level-2 rule is broken in practice.
 - **Q7 Tracking:** each project's plan lives in its own repository's `ROADMAP.md` (section 14). No hosted issue tracker is used, including for memorytree itself.
 
 ## 16. First memories
