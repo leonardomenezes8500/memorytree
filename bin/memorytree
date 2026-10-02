@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.23"
+VERSION = "0.1.24"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -396,33 +396,44 @@ GLOBAL_INSTRUCTIONS = {"claude-code": CLAUDE_HOME / "CLAUDE.md", "codex": CODEX_
 BLOCK = re.compile(r"<!-- memorytree -->\n.*?<!-- /memorytree -->\n?", re.S)
 
 
-def pinned_memories():
-    return [(str(p.relative_to(VAULT)), *front_matter(p.read_text())) for p in sorted((VAULT / "pinned").glob("*.md"))]
+def pinned_memories(node=""):
+    """Pins directly under pinned/<node>: root pins load every session, deeper ones through `show`."""
+    return [(str(p.relative_to(VAULT)), *front_matter(p.read_text()))
+            for p in sorted((VAULT / "pinned" / node).glob("*.md"))]
+
+
+def pin_line(rel, meta, body, full=False):
+    """(is_key, line). A level-2 pin is only its keys and its node; a pin with pins under it names its node."""
+    node = rel.removeprefix("pinned/").removesuffix(".md")
+    if not full and meta.get("level") == "2" and meta.get("keys"):
+        return True, f"- [{'|'.join(k.strip() for k in meta['keys'].split(','))}] → {node}"
+    more = f" → {node}" if (VAULT / "pinned" / node).is_dir() else ""
+    return False, f"- {' '.join(body.split()) if full else meta.get('rule') or ' '.join(body.split())}{more}"
 
 
 def commandments_block():
     """Commandments plus pinned memories. They go into the agents' global instructions, which subagents
     read too; hook injections only reach the main session."""
     text = (VAULT / "COMMANDMENTS.md").read_text() if (VAULT / "COMMANDMENTS.md").is_file() else COMMANDMENTS
-    text = text.replace("`memorytree search", f"`python3 {Path(__file__).resolve()} search").strip()
+    text = text.strip()
     # This block loads even when the hooks don't run, so it is what can tell the user they aren't running.
     text += ("\nHook check: if your context lacks \"memorytree is active\", tell the user first that its hooks aren't "
              "running (Codex: trust them in /hooks; Claude Code: enable the plugin), then to start a new session.")
     # Each pin's one-line `rule` is what loads every session; its full text stays in the vault, a search away.
     # A level-2 pin loads only its keys, like a skill's description: the agent opens the file when the task
     # touches one. The model decides, not a keyword hook, so a missed trigger can't silently drop the rule.
+    # Only root pins load; the tree below them is walked with `show`, one node at a time.
     full = config()["core.mode"] == "full"
-    pins, keyed = [], []
-    for rel, meta, body in pinned_memories():
-        if not full and meta.get("level") == "2" and meta.get("keys"):
-            keyed.append(f"- [{'|'.join(k.strip() for k in meta['keys'].split(','))}] → {VAULT / rel}")
-        else:
-            pins.append(f"- {' '.join(body.split()) if full else meta.get('rule') or ' '.join(body.split())}")
+    lines = [pin_line(rel, meta, body, full) for rel, meta, body in pinned_memories()]
+    pins, keyed = [line for key, line in lines if not key], [line for key, line in lines if key]
     if pins:
         text += "\n\n# Pinned rules\n" + "\n".join(pins)
     if keyed:
-        text += ("\n\n# Pinned keys\nWhen a task touches a key, read its file before acting and follow it as a "
-                 "pinned rule.\n" + "\n".join(keyed))
+        text += "\n\n# Pinned keys\n" + "\n".join(keyed)
+    if keyed or any((VAULT / rel.removesuffix(".md")).is_dir() for rel, _, _ in pinned_memories()):
+        text += ("\n`→ node`: when a task touches a key or rule, run `memorytree show <node>` before acting and "
+                 "follow it as a pinned rule; it lists the keys one level deeper.")
+    text = text.replace("`memorytree ", f"`python3 {Path(__file__).resolve()} ")
     return f"<!-- memorytree -->\n{text}\n<!-- /memorytree -->\n"
 
 
@@ -436,6 +447,21 @@ def install_commandments(agent, remove=False):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(new)
     return new != old
+
+
+def cmd_show(args):
+    """One step down the pin tree: a pin in full, then the keys of the pins under it."""
+    node = args.node.strip("/").removeprefix("pinned/").removesuffix(".md")
+    path = VAULT / "pinned" / f"{node}.md"
+    if not path.is_file():
+        print(f"memorytree: no pinned node {node!r}", file=sys.stderr)
+        return 1
+    meta, body = front_matter(path.read_text())
+    print(f"# {meta.get('title', node)}\n{body}")
+    deeper = [pin_line(rel, meta, body)[1] for rel, meta, body in pinned_memories(node)]
+    if deeper:
+        print("\n# Deeper (memorytree show <node>)\n" + "\n".join(deeper))
+    return 0
 
 
 def cmd_install(args):
@@ -928,6 +954,10 @@ def main(argv=None):
     p.add_argument("-d", "--depth", type=int, default=2, choices=range(1, 6),
                    help="deepest level to search: 1 current, 2 history (default), 3 explorations, 4 archive, 5 notes")
     p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("show", help="print a pinned node and the keys one level deeper")
+    p.add_argument("node", help="e.g. scripts or scripts/posix-shell")
+    p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("install", help="write the commandments into each agent's global instructions")
     p.add_argument("agents", nargs="*", choices=list(GLOBAL_INSTRUCTIONS))

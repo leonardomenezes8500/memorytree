@@ -245,9 +245,20 @@ assert not plain_commit("pinned/shell.md", KEYED.replace("keys: shell, sh, scrip
 assert plain_commit("pinned/shell.md", KEYED, "pin(shell): posix\n\nKind: pin\nTopic: shell\n")
 mt("install", "codex")
 agents_md = (HOMES / "codex" / "AGENTS.md").read_text()
-assert f"# Pinned keys\nWhen a task touches a key, read its file" in agents_md
-assert f"- [shell|sh|script] → {VAULT}/pinned/shell.md" in agents_md and "POSIX sh only." not in agents_md
-assert "- Keep it simple." in agents_md  # level-1 pins still load their rule
+assert "# Pinned keys\n- [shell|sh|script] → shell\n" in agents_md and "POSIX sh only." not in agents_md
+assert "show <node>` before acting" in agents_md and str(VAULT) not in agents_md  # no paths, the CLI walks
+assert "- Keep it simple.\n" in agents_md  # level-1 pins still load their rule
+
+# pin-tree: only root pins load; show walks one level at a time
+assert plain_commit("pinned/shell/help.md", "---\ntitle: Help\nrule: Short help.\nlevel: 2\nkeys: -h, usage\n---\n\nOne line per flag.\n",
+                    "pin(shell): help\n\nKind: pin\nTopic: shell\n")
+mt("install", "codex")
+agents_md = (HOMES / "codex" / "AGENTS.md").read_text()
+assert "help" not in agents_md.split("# Pinned rules")[1]  # deeper pins stay out of the root
+shown = mt("show", "shell")
+assert "Use dash -n." in shown and "- [-h|usage] → shell/help" in shown
+assert "One line per flag." in mt("show", "shell/help") and "Deeper" not in mt("show", "shell/help")
+mt("show", "nope", ok=False)
 mt("install", "--uninstall")
 assert (HOMES / "claude" / "CLAUDE.md").read_text().strip() == "# my rules\n\nBe brief."
 
