@@ -40,7 +40,7 @@ Every edge is derived from plain git data. No separate graph database exists, an
 1. **Git is the engine.** memorytree adds memory semantics on top of git and never reimplements what git already does: storage, hashing, history, search, sync, merge, config, hooks.
 2. **Minimal dependencies.** Git is required. Python 3 (standard library only) runs the hooks and the search index (Q1).
 3. **No escape.** While memorytree is active, an agent cannot skip reading it or save memory anywhere else (section 9).
-4. **Memory is for models, docs are for people.** Whatever loads into an agent's context on its own (memories, pinned rules, the commandments, CLAUDE.md, AGENTS.md) is compiled for tokens: inject the relevant slice, never the whole store, as dense facts. `core.mode = economy` (the default) loads each pinned memory as its one-line `rule:`; `full` trades tokens for prose. A PreToolUse hook (Claude Code; Codex has none) refuses an edit that grows a CLAUDE.md or AGENTS.md past `core.maxInstructionChars`. Project docs (README, DESIGN, ROADMAP) are read on demand by people and agents alike, so they are written for humans: descriptive, the why in full, never compressed to save tokens. The instruction file links to them instead of repeating them.
+4. **Memory is for models, docs are for people.** Whatever loads into an agent's context on its own (memories, pinned rules, the commandments, CLAUDE.md, AGENTS.md) is compiled for tokens: inject the relevant slice, never the whole store, as dense facts. `core.mode = economy` (the default) loads each root pin as its one-line `rule:` or its keys, and deeper pins only when a task walks to them (section 7b); `full` trades tokens for prose. A PreToolUse hook (Claude Code; Codex has none) refuses an edit that grows a CLAUDE.md or AGENTS.md past `core.maxInstructionChars`. Project docs (README, DESIGN, ROADMAP) are read on demand by people and agents alike, so they are written for humans: descriptive, the why in full, never compressed to save tokens. The instruction file links to them instead of repeating them.
 5. **English, always.** Code, docs, memories, keywords and commit messages are in English. The only exception is text that must be kept verbatim in its original language (a quote, a hardcoded UI string); it is stored as-is and marked as verbatim.
 6. **The user owns the data.** The vault is a private repository the user controls. memorytree ships no server and no telemetry.
 
@@ -53,7 +53,7 @@ Every edge is derived from plain git data. No separate graph database exists, an
   COMMANDMENTS.md              the rules every agent follows (section 8)
   user/
     profile.md                 who the user is and how agents should behave (always loaded)
-  pinned/<slug>.md             memories the user explicitly endorsed (always loaded, protected)
+  pinned/<node>.md, <node>/    memories the user explicitly endorsed, as a tree (roots always loaded, protected)
   projects/<name>/
     overview.md                purpose, status, where it lives
     decisions.md               current decisions (the history holds the path)
@@ -137,7 +137,7 @@ Branches and tags are different things: a **branch** is a pointer that moves (a 
 
 | Level | Git object | Holds | Abstraction | Loaded |
 |---|---|---|---|---|
-| 0 | `main:user/profile.md`, `main:pinned/` | who the user is, how agents behave, what the user explicitly endorsed | identity | every session |
+| 0 | `main:user/profile.md`, `main:pinned/` | who the user is, how agents behave, what the user explicitly endorsed | identity | every session (root pins; deeper pins via `memorytree show`) |
 | 1 | files on `main` | current truth: facts, decisions, preferences | concrete | injected per prompt when relevant |
 | 2 | history of `main` (messages, trailers, diffs) | how and why things changed: the path from A to D | causal | on search |
 | 3 | branches `explore/<idea>` | live alternatives still being developed, not accepted yet | hypothetical | on search, only when the idea comes up |
@@ -166,6 +166,9 @@ Most memories are inferred: the capture model decides what was worth keeping. A 
 3. Search by depth (section 7a): injected memories → current state → history → explorations → archive → hindsight. Go one level deeper only when the level above doesn't answer.
 4. The current state tells you *what*; history tells you *why*. Before proposing something, check whether it was already tried and abandoned.
 5. Capture happens automatically. If the user corrects you or decides something, make sure it reaches memorytree in the commit format.
+6. Pinned rules change only on the user's explicit request: `memorytree add --pin "<rule>"` proposes the place in the tree, `memorytree add --confirm` commits it after their OK. A fact the user asks to keep: `memorytree add "<text>"`.
+
+The live text is `COMMANDMENTS.md` in the vault; this list is the design intent.
 6. One memory per subject. Edit it; don't duplicate it. Never store secret values, only where they live.
 
 ## 9. Enforcement: no escape
@@ -198,6 +201,7 @@ Instructions are requests, and a model can ignore them. memorytree therefore enf
 5. Install the commandments pointer in each agent's global instructions.
 6. Offer to migrate existing native memories into the layout, one `migrate` commit per source.
 7. Install the vault's git hooks.
+8. Optional: `make install` in a clone of this repository puts the `memorytree` CLI on the PATH (`~/.local/bin`; `make uninstall` removes it), for terminals and agents without the plugin's PATH.
 
 Every tunable lives in the config file, including which model each agent uses for each job. Nothing is hardcoded and no environment variables are needed. A key missing from the file falls back to the same default that `init` writes.
 
