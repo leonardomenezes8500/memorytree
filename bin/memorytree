@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.24"
+VERSION = "0.1.25"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -460,7 +460,8 @@ def cmd_show(args):
     print(f"# {meta.get('title', node)}\n{body}")
     deeper = [pin_line(rel, meta, body)[1] for rel, meta, body in pinned_memories(node)]
     if deeper:
-        print("\n# Deeper (memorytree show <node>)\n" + "\n".join(deeper))
+        print("\n# Deeper: before acting, run `memorytree show <node>` for each one the task touches\n"
+              + "\n".join(deeper))
     return 0
 
 

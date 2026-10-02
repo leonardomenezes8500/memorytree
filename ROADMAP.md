@@ -67,7 +67,7 @@ The stone, broken into pieces. Milestones are outcomes, sprints are batches of w
 
 28. [x] `make-install`: `make install` puts the CLI in `$(PREFIX)/bin` (`~/.local` by default), `make uninstall` removes it. Done when both work with a custom PREFIX.
 29. [x] `show-cmd`: `memorytree show <node>` prints a pin's rule and its children's keys, so key lines need no path (`[shell|sh] → scripts/posix-shell`). Done when walking from a root key to a leaf needs only `show`.
-30. [ ] `pin-tree`: pins nest by generality (`pinned/scripts.md` parents `pinned/scripts/posix-shell.md`); only root pins load into CLAUDE.md/AGENTS.md, a more general rule said later becomes the parent. Done when the current pins live in a tree and a fresh session still follows a leaf rule.
+30. [x] `pin-tree`: pins nest by generality (`pinned/scripts.md` parents `pinned/scripts/posix-shell.md`); only root pins load into CLAUDE.md/AGENTS.md, a more general rule said later becomes the parent. Done when the current pins live in a tree and a fresh session still follows a leaf rule.
 31. [ ] `add-cmd`: `memorytree add "<text>"` has the cheap model place a memory in the tree (creating a parent when it is more general) and commit it; for a pin it proposes the place and waits for the user's confirmation. Done when an added rule lands under the right parent with no expensive-model tokens spent.
 
 ## Later
