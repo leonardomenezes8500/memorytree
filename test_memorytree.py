@@ -330,6 +330,39 @@ capture_turn("s7", "gostei", "ok")
 assert (VAULT / "pinned" / "style.md").read_text() == pinned_before
 assert vault_git("rev-parse", "HEAD") == head and not vault_git("status", "--porcelain").strip()
 
+# add-cmd: a memory commits straight away; a pin is only proposed until --confirm
+fake({"memories": [{"path": "topics/backups.md", "title": "Backups", "keywords": "backup", "body": "Nightly to the NAS."}],
+      "commit": {"kind": "fact", "topics": ["backups"], "summary": "backups run nightly"}})
+assert "fact(backups): backups run nightly" in mt("add", "backups", "rodam", "toda", "noite")
+assert "Nightly to the NAS." in (VAULT / "topics" / "backups.md").read_text()
+# a more general rule said later becomes the parent: the narrower pins move under it
+head = vault_git("rev-parse", "HEAD")
+PIN2 = {"level": "2", "keys": "shell, sh, script"}
+fake({"memories": [
+    {"path": "pinned/scripts.md", "title": "Scripts", "body": "Small and portable.", "rule": "Scripts: small, portable.",
+     "level": "2", "keys": "script, cli"},
+    {"path": "pinned/shell.md", "delete": True}, {"path": "pinned/shell/help.md", "delete": True},
+    {"path": "pinned/scripts/shell.md", "title": "Shell", "body": "Use dash -n.", "rule": "POSIX sh only.", **PIN2},
+    {"path": "pinned/scripts/shell/help.md", "title": "Help", "body": "One line per flag.", "rule": "Short help.",
+     "level": "2", "keys": "-h, usage"}],
+      "commit": {"kind": "preference", "topics": ["scripts"], "summary": "scripts become the parent"}})
+proposal = mt("add", "--pin", "scripts", "são", "pequenos")
+assert "pinned/scripts.md (level 2, keys script, cli)" in proposal and "- delete pinned/shell.md" in proposal
+assert "add --confirm" in proposal and vault_git("rev-parse", "HEAD") == head  # nothing before the user's OK
+fake({"memories": []})  # confirming applies the saved proposal; it never asks the model again
+assert "pin(scripts): scripts become the parent" in mt("add", "--confirm")
+assert not (VAULT / "pinned" / "shell.md").exists() and "keys: shell, sh, script" in \
+    (VAULT / "pinned" / "scripts" / "shell.md").read_text()
+assert "- [shell|sh|script] → scripts/shell" in mt("show", "scripts")
+assert "- [-h|usage] → scripts/shell/help" in mt("show", "scripts/shell")
+mt("add", "--confirm", ok=False)  # a proposal is applied once
+# a plain add that tries to touch a pin is held for confirmation too
+fake({"memories": [{"path": "pinned/style.md", "title": "T", "body": "rewritten", "rule": "x"}],
+      "commit": {"kind": "fact", "topics": ["style"], "summary": "x"}})
+head = vault_git("rev-parse", "HEAD")
+assert "nothing committed yet" in mt("add", "estilo") and vault_git("rev-parse", "HEAD") == head
+assert "rewritten" not in (VAULT / "pinned" / "style.md").read_text()
+
 # conflict-resolution: two machines change one memory; the model merges it and the push goes through
 remote = TMP / "remote.git"
 subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)

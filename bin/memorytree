@@ -14,7 +14,7 @@ import time
 import tomllib
 from pathlib import Path
 
-VERSION = "0.1.25"
+VERSION = "0.1.26"
 VAULT = Path(os.environ.get("MEMORYTREE_DIR", "~/.memorytree")).expanduser()
 CONFIG = VAULT / "config"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
@@ -102,7 +102,7 @@ Your only memory is the git vault ~/.memorytree; never use or write built-in mem
 - An unknown name, project, decision or preference: `memorytree search <english terms> [-d 1-5]` before asking or exploring. Always English.
 - History says why: before proposing an idea, check it wasn't already tried and dropped.
 - "Where did we stop?": `git -C ~/.memorytree log -10 --format='%cs %s'`, then the project's plan (its ROADMAP.md, tracker or README) and recent git log. Never read a whole codebase to find out.
-- Pinned rules change only on the user's explicit request. Never store secret values.
+- Pinned rules change only on the user's explicit request: `memorytree add --pin "<rule>"` proposes its place in the tree; `--confirm` after their OK. Facts to keep: `memorytree add "<text>"`. Never store secret values.
 - Everything loaded into context is compiled for tokens (core.mode, economy by default): memories, pinned rules, CLAUDE.md, AGENTS.md. Dense facts, no filler or repetition, link depth instead of inlining it; every pinned memory carries a one-line `rule:`. Project docs (README, DESIGN, ROADMAP) are for people, read on demand: human-friendly, the why in full.
 """
 
@@ -419,6 +419,7 @@ def commandments_block():
     # This block loads even when the hooks don't run, so it is what can tell the user they aren't running.
     text += ("\nHook check: if your context lacks \"memorytree is active\", tell the user first that its hooks aren't "
              "running (Codex: trust them in /hooks; Claude Code: enable the plugin), then to start a new session.")
+    text += f"\n`memorytree` not on PATH: `python3 {Path(__file__).resolve()}`."
     # Each pin's one-line `rule` is what loads every session; its full text stays in the vault, a search away.
     # A level-2 pin loads only its keys, like a skill's description: the agent opens the file when the task
     # touches one. The model decides, not a keyword hook, so a missed trigger can't silently drop the rule.
@@ -433,7 +434,6 @@ def commandments_block():
     if keyed or any((VAULT / rel.removesuffix(".md")).is_dir() for rel, _, _ in pinned_memories()):
         text += ("\n`→ node`: when a task touches a key or rule, run `memorytree show <node>` before acting and "
                  "follow it as a pinned rule; it lists the keys one level deeper.")
-    text = text.replace("`memorytree ", f"`python3 {Path(__file__).resolve()} ")
     return f"<!-- memorytree -->\n{text}\n<!-- /memorytree -->\n"
 
 
@@ -683,14 +683,15 @@ Rules:
 - Paths: user/profile.md (stable facts about the user, under 40 lines), projects/<name>/<file>.md, env/<file>.md, \
 topics/<file>.md. Lowercase, hyphens, .md. One memory per subject: to change one, return its full new content under \
 the same path. Link related memories with [[path-without-.md]].
-- pinned/<slug>.md only when the user explicitly asked in this exchange to pin, update or remove a pinned memory; \
-then the commit kind is pin or unpin. Praise without an explicit request is a preference, never a pin.
+- pinned/<node>.md (children under pinned/<parent>/) only when the user explicitly asked in this exchange to pin, \
+update or remove a pinned memory; then the commit kind is pin or unpin, and an existing pin keeps its level and keys. \
+Praise without an explicit request is a preference, never a pin.
 - Never record secret values; record where they live.
 - The commit body says why, and what was ruled out. That is how the path from one idea to the next is remembered.
 
 Return ONLY JSON:
 {{"memories": [{{"path": "...", "title": "...", "keywords": "english search terms", "body": "markdown", \
-"rule": "pinned only"}}, \
+"rule": "pinned only", "level": "pinned only", "keys": "level-2 pins only"}}, \
 {{"path": "...", "delete": true}}],
  "commit": {{"kind": "one of {kinds}", "topics": ["main-topic"], "summary": "imperative, under 60 characters", \
 "body": "why"}},
@@ -783,7 +784,8 @@ def apply_capture(result, agent, session_id):
             continue
         one_line = lambda v: " ".join(str(v).split())
         target.parent.mkdir(parents=True, exist_ok=True)
-        rule = f"rule: {one_line(item['rule'])}\n" if path.startswith("pinned/") and item.get("rule") else ""
+        rule = "".join(f"{k}: {one_line(item[k])}\n" for k in ("rule", "level", "keys")
+                       if path.startswith("pinned/") and item.get(k))
         target.write_text(SECRET.sub("[REDACTED]", f"---\ntitle: {one_line(item.get('title') or target.stem)}\n"
                                                    f"keywords: {one_line(item.get('keywords', ''))}\n{rule}---\n\n{body}\n"))
         written.append(path)
@@ -834,6 +836,105 @@ def sync(agent):
         git("rebase", "--abort", check=False)  # unresolved: keep local commits, retry on the next capture
         return
     git("push", "-q", check=False)
+
+
+ADD_PROMPT = """You maintain memorytree, a git repository of memories shared by one user's coding agents. The user \
+asked to remember the text below. {where}
+
+Rules:
+- English only, factual, even when the text is in another language. Today is {today}.
+- {style}
+- Never record secret values; record where they live.
+- The commit body says why, and what was ruled out.
+
+Return ONLY JSON:
+{{"memories": [{{"path": "...", "title": "...", "keywords": "english search terms", "body": "markdown", \
+"rule": "pinned only", "level": "pinned only: 1 or 2", "keys": "level-2 pins only: comma-separated"}}, \
+{{"path": "...", "delete": true}}],
+ "commit": {{"kind": "one of {kinds}", "topics": ["main-topic"], "summary": "imperative, under 60 characters", \
+"body": "why"}}}}
+
+<text>
+{text}
+</text>
+
+<existing>
+{existing}
+</existing>
+"""
+ADD_MEMORY = """Store it as a memory: return the full new content of the existing memory on the same subject under its \
+path, or create one at user/<file>.md, projects/<name>/<file>.md, env/<file>.md or topics/<file>.md (lowercase, \
+hyphens). Link related memories with [[path-without-.md]]. Never write under pinned/."""
+ADD_PIN = """Pin it as a rule in the pinned tree. The pins form a tree ordered by generality, not by date: \
+pinned/<node>.md is a root, loaded every session; its children live in pinned/<node>/ and are read on demand.
+- Put the rule under the most specific existing pin it belongs to, or extend that pin (return its full new content).
+- If it is more general than existing pins, create it as their parent and move them under it: delete each old path \
+and return its full content at the new path, keeping its rule, level and keys.
+- Every pin has a one-line "rule". A rule that applies to every turn or commit is a root with level 1. A rule tied \
+to an activity has level 2 and "keys": the words a task touching it would contain.
+- The commit kind is pin."""
+
+
+def describe(result):
+    lines = []
+    for m in result.get("memories") or []:
+        if not isinstance(m, dict):
+            continue
+        if m.get("delete"):
+            lines.append(f"- delete {m.get('path')}")
+            continue
+        extra = ", ".join(f"{k} {' '.join(str(m[k]).split())}" for k in ("level", "keys") if m.get(k))
+        lines.append(f"- {m.get('path')}" + (f" ({extra})" if extra else ""))
+        if m.get("rule"):
+            lines.append(f"  rule: {' '.join(str(m['rule']).split())}")
+        lines.append("  " + "\n  ".join(str(m.get("body", "")).strip().splitlines()))
+    return "\n".join(lines)
+
+
+def cmd_add(args):
+    """Remember a text through the cheap model. A pin is only proposed: it waits for --confirm."""
+    pending = session_path("x").parent.parent / "pending-pin.json"
+    if args.confirm:
+        if not pending.is_file():
+            print("memorytree: no pending pin; propose one with: memorytree add --pin <text>", file=sys.stderr)
+            return 1
+        result = json.loads(pending.read_text())
+        result.setdefault("commit", {})["kind"] = "pin"
+    else:
+        text = " ".join(args.text).strip()
+        if not text:
+            print("memorytree: nothing to add", file=sys.stderr)
+            return 1
+        if args.pin:
+            existing = [(str(p.relative_to(VAULT)), p.read_text()) for p in sorted((VAULT / "pinned").rglob("*.md"))]
+        else:
+            existing = [(path, (VAULT / path).read_text()) for path, *_ in search_current(terms(text), limit=5)
+                        if (VAULT / path).is_file()]
+        result = parse_json(run_model(args.agent, ADD_PROMPT.format(
+            where=ADD_PIN if args.pin else ADD_MEMORY, today=time.strftime("%Y-%m-%d"), kinds=", ".join(KINDS),
+            style=STYLE.get(config()["core.mode"], STYLE["economy"]), text=text,
+            existing="\n\n".join(f"### {path}\n{body}" for path, body in existing) or "(none)")))
+        paths = [str(m.get("path", "")) for m in result.get("memories") or [] if isinstance(m, dict)]
+        if not paths:
+            print("memorytree: the model returned nothing to add", file=sys.stderr)
+            return 1
+        if args.pin or any(p.startswith("pinned/") for p in paths):  # pins change only on the user's OK
+            pending.parent.mkdir(parents=True, exist_ok=True)
+            pending.write_text(json.dumps(result, indent=1))
+            print(f"Proposed pin change (nothing committed yet):\n{describe(result)}\n\n"
+                  "Show this to the user. After their OK: memorytree add --confirm")
+            return 0
+    with vault_lock():
+        sha = apply_capture(result, args.agent, None)
+        if not sha:
+            print("memorytree: nothing committed", file=sys.stderr)
+            return 1
+        if config()["sync.push"] == "after-capture":
+            sync(args.agent)
+    if args.confirm:
+        pending.unlink(missing_ok=True)
+    print(f"{sha} {git('log', '-1', '--format=%s').stdout.strip()}")
+    return 0
 
 
 def cmd_capture(args):
@@ -955,6 +1056,14 @@ def main(argv=None):
     p.add_argument("-d", "--depth", type=int, default=2, choices=range(1, 6),
                    help="deepest level to search: 1 current, 2 history (default), 3 explorations, 4 archive, 5 notes")
     p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("add", help="remember a text through the cheap model; a pin waits for --confirm")
+    p.add_argument("text", nargs="*", help="what to remember, in any language")
+    p.add_argument("--pin", action="store_true", help="propose it as a pinned rule in the tree")
+    p.add_argument("--confirm", action="store_true", help="commit the pending pin proposal")
+    p.add_argument("--agent", default="claude-code", choices=("claude-code", "codex"),
+                   help="whose cheap model to call")
+    p.set_defaults(func=cmd_add)
 
     p = sub.add_parser("show", help="print a pinned node and the keys one level deeper")
     p.add_argument("node", help="e.g. scripts or scripts/posix-shell")
