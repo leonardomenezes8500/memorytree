@@ -187,7 +187,7 @@ Instructions are requests, and a model can ignore them. memorytree therefore enf
 
 1. **Session start:** pull with rebase, then inject the user profile and a pointer to the commandments.
 2. **Every prompt:** search the current state with the prompt's terms, then inject the top N memories, at most once per session each.
-3. **Every turn end:** a detached process gives the exchange plus related memories to a cheap model (Haiku on Claude Code, the cheapest model on Codex). The model returns file edits plus a commit message in the section 6 format. memorytree validates them, commits and pushes. The process survives the session ending.
+3. **Every turn end:** a detached process gives the exchange plus related memories to a cheap model (Haiku on Claude Code, the cheapest model on Codex). The model returns file edits plus a commit message in the section 6 format. memorytree validates them, commits and pushes. A rewrite keeps every fact still true, and nothing is deleted over a proposal still under discussion. Whatever a capture removes or rewords anyway is listed in the commit body ("Removed or reworded lines"), so it stays findable through history search instead of vanishing; refusing shrinking rewrites was ruled out, because most of them are legitimate status updates. The process survives the session ending.
 4. **Conflicts:** pull with rebase. A conflict on a memory file is handed to the cheap model with both versions and resolved as a `correction` commit.
 
 ## 11. Setup and config

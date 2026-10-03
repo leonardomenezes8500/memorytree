@@ -313,6 +313,17 @@ assert "Use SQLite." in stored and "ghp_" not in stored  # secret redacted, memo
 nxt = hook("prompt", "claude-code", {"session_id": "s5", "prompt": "ok, e agora?"})
 assert "projects/radar/overview.md" in nxt["additionalContext"]
 
+# capture-no-silent-delete: every line a capture removes stays in the commit body, found by history search
+fake({"memories": [{"path": "topics/storage.md", "title": "Storage", "keywords": "sqlite", "body": "Use Postgres now."}],
+      "commit": {"kind": "decision", "topics": ["storage"], "summary": "move to postgres"}})
+capture_turn("s5b", "e se fosse postgres?", "Could be.")
+assert "Removed or reworded lines:\n- topics/storage.md: Use SQLite." in git_log()
+assert "move to postgres" in mt("search", "sqlite", "-d", "2")
+fake({"memories": [{"path": "topics/storage.md", "delete": True}],
+      "commit": {"kind": "abandon", "topics": ["storage"], "summary": "drop storage notes"}})
+capture_turn("s5c", "apaga isso", "ok")
+assert "- topics/storage.md: Use Postgres now." in git_log() and "drop storage notes" in mt("search", "postgres")
+
 # capture-apply: paths outside the layout are dropped; nothing worth keeping commits nothing
 head = vault_git("rev-parse", "HEAD")
 fake({"memories": [{"path": "../escape.md", "body": "x"}, {"path": "misc/a.md", "body": "x"}],

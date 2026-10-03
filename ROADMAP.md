@@ -59,7 +59,7 @@ The stone, broken into pieces. Milestones are outcomes, sprints are batches of w
 
 ### M8 Trust: capture never loses a fact silently
 
-27. [ ] `capture-no-silent-delete`: capture may delete or overwrite a memory only for a decision or correction the user stated, never for a proposal still under discussion (on 2026-10-01 a proposal was taken as a decision and memories were deleted). Done when a proposal turn leaves every existing memory intact and a stated decision still updates it.
+27. [x] `capture-no-silent-delete`: capture may drop a fact or delete a memory only when the exchange shows it false or the user dropped it, never over a proposal (on 2026-10-01 a proposal was taken as a decision and memories were deleted; on 2026-10-02 a rewrite dropped facts). Every line a capture removes or rewords goes into the commit body, which history search indexes. Done when a removed line is found with `memorytree search` and the capture prompt forbids deleting over a proposal.
 
 ## Sprint 5
 
